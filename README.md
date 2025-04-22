@@ -21,6 +21,12 @@ This library provides a set of tools and abstractions for creating and verifying
   - Confidential Voting: Vote without revealing your choice
   - Identity Verification: Prove attributes without revealing them
 
+## Built-in parameters:
+
+- BLS12-381: up to 16K constraints (via Ethereum KZG Ceremony)
+
+- BN254: up to 128K constraints (via Perpetual Powers of Tau Ceremony)
+
 ## About This Project
 
 This library aims to bridge the gap between advanced cryptographic primitives and the Algorand blockchain. By providing simple abstractions over complex zero-knowledge proof systems, developers can easily incorporate privacy features into their Algorand applications without deep cryptographic expertise.
