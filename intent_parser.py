@@ -11,12 +11,10 @@ from utils import (
 def parse_intent(user_input):
     """
     Parse natural language intent for sending tokens
-    Uses the enhanced extraction functions from utils.py
+    Improved to handle text numbers with multi-word token descriptions
     """
-    # Use the new extract_intent_components function from utils.py
+    # First try the extract_intent_components approach
     components = extract_intent_components(user_input)
-    
-    # Check if we have all required components
     if (components['action'] and components['amount'] is not None and 
             components['token'] and components['recipient']):
         return {
@@ -26,37 +24,97 @@ def parse_intent(user_input):
             'recipient': components['recipient']
         }
     
-    # Fallback to regex pattern if extract_intent_components doesn't work
-    # This pattern is more flexible and matches more token variations
-    pattern = re.compile(
-        r"(?P<action>send|transfer)\s+(?P<amount>\d*\.?\d+|[a-zA-Z\s-]+)\s+(?P<token>(?:native\s+)?(?:algo|algos|algorand)(?:\s+(?:native\s+)?(?:token|tokens|coin|cryptocurrency))?(?:\s+(?:of\s+)?(?:algorand))?)\s+to\s+(?P<address>[A-Z0-9]{58})",
-        re.IGNORECASE
-    )
-    match = pattern.search(user_input)
-    if not match:
+    # If that fails, use a more targeted approach
+    
+    # Extract action and address first (these are easier to identify)
+    action_pattern = r'\b(send|transfer|move|pay|give)\b'
+    action_match = re.search(action_pattern, user_input, re.IGNORECASE)
+    if not action_match:
+        return None
+    action = action_match.group(1).lower()
+    
+    # Extract address
+    address = parse_address(user_input)
+    if not address:
         return None
     
-    intent = match.groupdict()
-    intent['token'] = normalize_token_name(intent['token'])
+    # Now extract the middle part between action and "to address"
+    to_address_part = f"to {address}"
+    middle_text = user_input[user_input.lower().find(action.lower()) + len(action):user_input.lower().find(to_address_part.lower())]
+    middle_text = middle_text.strip()
     
-    amount = intent['amount'].strip()
-    if not any(c.isdigit() for c in amount):
-        numeric_amount = text_to_number(amount)
-        if numeric_amount is None:
-            return None
-        intent['amount'] = numeric_amount
+    # Define number words that might appear in text-based numbers
+    number_words = [
+        'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+        'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+        'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+        'hundred', 'thousand', 'million', 'point'
+    ]
+    
+    # Define token words that might appear in token descriptions
+    token_words = [
+        'algo', 'algos', 'algorand', 'token', 'tokens', 'native', 'cryptocurrency', 'coin', 'coins'
+    ]
+    
+    # Split the middle text into words
+    words = middle_text.lower().split()
+    
+    # Find the boundary between number words and token words
+    number_end_idx = 0
+    for i, word in enumerate(words):
+        if word in number_words or word.replace('.', '').isdigit():
+            number_end_idx = i
+        elif word in token_words and i > 0:
+            # Found first token word, so the number part ends at the previous word
+            break
+    
+    # Extract amount text and token text
+    amount_text = ' '.join(words[:number_end_idx + 1])
+    token_text = ' '.join(words[number_end_idx + 1:])
+    
+    # If we couldn't split properly, try another approach
+    if not amount_text or not token_text:
+        # Try to match a numeric amount first
+        numeric_pattern = r'(\d+(?:\.\d+)?)'
+        numeric_match = re.search(numeric_pattern, middle_text)
+        if numeric_match:
+            amount_text = numeric_match.group(1)
+            # Remove the amount from the middle text to get the token
+            token_text = middle_text.replace(amount_text, '', 1).strip()
+        else:
+            # Try different split points to find a valid number and token
+            for i in range(1, len(words)):
+                potential_amount = ' '.join(words[:i])
+                potential_token = ' '.join(words[i:])
+                
+                # Check if potential_amount can be converted to a number
+                amount_val = text_to_number(potential_amount)
+                if amount_val is not None:
+                    amount_text = potential_amount
+                    token_text = potential_token
+                    break
+    
+    # Convert amount text to number
+    if amount_text:
+        if amount_text.replace('.', '').isdigit():
+            amount = float(amount_text)
+        else:
+            amount = text_to_number(amount_text)
+            if amount is None:
+                return None
     else:
-        try:
-            intent['amount'] = float(amount)
-        except ValueError:
-            return None
+        return None
     
-    intent['action'] = intent['action'].lower()
+    # Normalize token
+    token = normalize_token_name(token_text)
+    if not token:
+        return None
+    
     return {
-        'action': intent['action'],
-        'amount': intent['amount'],
-        'token': intent['token'],
-        'recipient': intent['address']
+        'action': action,
+        'amount': amount,
+        'token': token,
+        'recipient': address
     }
 
 def parse_nft_intent(user_input: str):
