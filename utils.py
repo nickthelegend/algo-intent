@@ -8,13 +8,18 @@ import ssl
 # Disable SSL verification (not recommended for production)
 ssl._create_default_https_context = ssl._create_unverified_context
 load_dotenv()
+# Disable SSL verification (not recommended for production)
+ssl._create_default_https_context = ssl._create_unverified_context
 
 ALGOD_ADDRESS = os.getenv('ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
 ALGOD_PORT = os.getenv('ALGOD_PORT', '443')
 ALGOD_TOKEN = os.getenv('ALGOD_TOKEN', 'a' * 64)
 
 def get_algod_client():
-    return algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+    try:
+        return algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+    except NameError:
+        raise ImportError("algosdk is required for this function. Install with: pip install py-algorand-sdk")
 
 def validate_address(address):
     return is_valid_address(address)
@@ -22,30 +27,12 @@ def validate_address(address):
 def text_to_number(text):
     """
     Convert text representation of numbers to actual numbers
-    Handles: 'five', 'twenty five', 'one hundred', etc.
+    Handles: 'five', 'twenty five', 'one hundred', 'zero point five', etc.
     """
     if not text or not isinstance(text, str):
         return None
         
-    # Handle decimal numbers
-    if '.' in text:
-        parts = text.split('.')
-        if len(parts) == 2:
-            whole = text_to_number(parts[0])
-            # Handle cases like "five point five"
-            if parts[1].isdigit():
-                decimal = int(parts[1]) / (10 ** len(parts[1]))
-            else:
-                decimal_num = text_to_number(parts[1])
-                if decimal_num is not None:
-                    decimal = decimal_num / 100  # Assume "point five" means 0.5
-                else:
-                    return None
-            if whole is not None:
-                return whole + decimal
-        return None
-    
-    # Basic number mapping
+    # Handle decimal numbers with 'point'
     numbers = {
         'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
         'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
@@ -65,27 +52,37 @@ def text_to_number(text):
     parts = text.split()
     total = 0
     current = 0
-    
+    decimal_part = False
+    decimal_str = ''
+
     for part in parts:
         if part not in numbers:
             return None
-        
         val = numbers[part]
-        
-        if val in [100, 1000, 1000000, 1000000000]:
-            # Handle multipliers like hundred, thousand, etc.
-            if current == 0:
-                current = 1
-            current *= val
-            # If this is the last multiplier in a sequence, add to total
-            if parts.index(part) == len(parts) - 1 or numbers[parts[parts.index(part) + 1]] < 100:
-                total += current
-                current = 0
+        if val == '.':
+            decimal_part = True
+            continue
+        if not decimal_part:
+            if val in [100, 1000, 1000000, 1000000000]:
+                if current == 0:
+                    current = 1
+                current *= val
+                # If this is the last multiplier in a sequence, add to total
+                if parts.index(part) == len(parts) - 1 or numbers[parts[parts.index(part) + 1]] < 100:
+                    total += current
+                    current = 0
+            else:
+                current += val
         else:
-            current += val
-    
-    # Add any remaining value
+            # Decimal part: append digits as string
+            decimal_str += str(val)
     total += current
+    if decimal_part:
+        try:
+            decimal_value = float('0.' + decimal_str)
+            total += decimal_value
+        except:
+            return None
     return total
 
 def normalize_token_name(token_name):
@@ -138,36 +135,6 @@ def normalize_token_name(token_name):
     
     # Default to uppercase for other tokens
     return token_name.upper()
-
-def extract_token_info(text):
-    """
-    Extract token name and amount from natural language text
-    Returns tuple of (amount, token_name)
-    """
-    # More flexible pattern to match longer token names
-    # This will capture phrases like "native algorand token" or "five algo native tokens"
-    pattern = r'(\d+(?:\.\d+)?|[a-zA-Z\s-]+)\s+((?:native\s+)?(?:algo|algos|algorand|usdc|usdt|dai|gard|planet)(?:\s+(?:native\s+)?(?:token|tokens|coin|cryptocurrency))?(?:\s+(?:of\s+)?(?:algorand))?)'
-    
-    match = re.search(pattern, text, re.IGNORECASE)
-    
-    if not match:
-        return None, None
-    
-    amount_text, token_text = match.groups()
-    
-    # Clean up amount text (remove trailing spaces that might have been captured)
-    amount_text = amount_text.strip()
-    
-    # Convert amount to number
-    if amount_text.replace('.', '').isdigit():
-        amount = float(amount_text)
-    else:
-        amount = text_to_number(amount_text)
-    
-    # Normalize token name
-    token = normalize_token_name(token_text)
-    
-    return amount, token
 
 def check_account_balance(address, amount, client, token='ALGO'):
     """
@@ -267,3 +234,33 @@ def extract_intent_components(text):
         'token': token,
         'recipient': recipient
     }
+
+def extract_token_info(text):
+    """
+    Extract token name and amount from natural language text
+    Returns tuple of (amount, token_name)
+    """
+    # More flexible pattern to match longer token names
+    # This will capture phrases like "native algorand token" or "five algo native tokens"
+    pattern = r'(\d+(?:\.\d+)?|[a-zA-Z\s-]+)\s+((?:native\s+)?(?:algo|algos|algorand|usdc|usdt|dai|gard|planet)(?:\s+(?:native\s+)?(?:token|tokens|coin|cryptocurrency))?(?:\s+(?:of\s+)?(?:algorand))?)'
+    
+    match = re.search(pattern, text, re.IGNORECASE)
+    
+    if not match:
+        return None, None
+    
+    amount_text, token_text = match.groups()
+    
+    # Clean up amount text (remove trailing spaces that might have been captured)
+    amount_text = amount_text.strip()
+    
+    # Convert amount to number
+    if amount_text.replace('.', '').isdigit():
+        amount = float(amount_text)
+    else:
+        amount = text_to_number(amount_text)
+    
+    # Normalize token name
+    token = normalize_token_name(token_text)
+    
+    return amount, token
