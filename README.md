@@ -51,6 +51,8 @@ python app.py disconnect-wallet
 
 Send ALGO using natural language instructions:
 
+NOTE: I have given a default address in this readme so you don't have to worry about finding an address.
+
 ```bash
 python app.py send-intent "Send five algos to K54ZTTHNDB567Q5J5T73CEJCT3Z3MB6VL35PJBIX57KGRWNGZZLH3BK7S4"
 ```
