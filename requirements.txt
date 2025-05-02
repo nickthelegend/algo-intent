@@ -1,0 +1,4 @@
+py-algorand-sdk
+python-dotenv
+click
+requests
