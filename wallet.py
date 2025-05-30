@@ -46,9 +46,10 @@ class WalletManager:
                 raise ValueError("Passwords do not match")
         
         # Encrypt the wallet data
+        encrypted_mnemonic = self._encrypt_data(passphrase, password)
         wallet_data = {
             "address": address,
-            "encrypted_mnemonic": self._encrypt_data(passphrase, password)
+            "encrypted_mnemonic": encrypted_mnemonic
         }
         
         # Save wallet data
@@ -62,10 +63,11 @@ class WalletManager:
         return {
             "address": address,
             "mnemonic": passphrase,  # Return mnemonic ONLY during creation for backup
+            "encrypted_mnemonic": encrypted_mnemonic,  # Added for Telegram bot
             "message": "⚠️ IMPORTANT: Save this mnemonic phrase securely. It will not be shown again!"
         }
     
-    def connect_wallet(self, passphrase=None):
+    def connect_wallet(self, passphrase=None, password=None):
         """Connect to a wallet using its mnemonic passphrase"""
         if not passphrase:
             passphrase = getpass.getpass("Enter your 25-word mnemonic phrase: ")
@@ -76,15 +78,17 @@ class WalletManager:
             address = account.address_from_private_key(private_key)
             
             # Get password for encrypting the wallet
-            password = getpass.getpass("Create a password to secure this wallet: ")
-            confirm = getpass.getpass("Confirm password: ")
-            if password != confirm:
-                raise ValueError("Passwords do not match")
+            if not password:
+                password = getpass.getpass("Create a password to secure this wallet: ")
+                confirm = getpass.getpass("Confirm password: ")
+                if password != confirm:
+                    raise ValueError("Passwords do not match")
             
             # Encrypt the wallet data
+            encrypted_mnemonic = self._encrypt_data(passphrase, password)
             wallet_data = {
                 "address": address,
-                "encrypted_mnemonic": self._encrypt_data(passphrase, password)
+                "encrypted_mnemonic": encrypted_mnemonic
             }
             
             # Save wallet data
@@ -96,6 +100,7 @@ class WalletManager:
             
             return {
                 "address": address,
+                "encrypted_mnemonic": encrypted_mnemonic,  # Added for Telegram bot
                 "message": "Wallet connected successfully"
             }
         except Exception as e:
@@ -114,44 +119,77 @@ class WalletManager:
             return None
         return {"address": self.connected_address}
     
-    def sign_transaction(self, txn):
-        """
-        Request user permission to sign a transaction with the connected wallet
-        Returns the signed transaction if approved
-        """
+    def get_transaction_details(self, txn):
+        """Get transaction details for display"""
+        details = {
+            "from": getattr(txn, 'sender', None),
+            "to": getattr(txn, 'receiver', None),
+            "amount_microalgos": getattr(txn, 'amt', None),
+            "fee_microalgos": getattr(txn, 'fee', None),
+            "type": type(txn).__name__
+        }
+        
+        if hasattr(txn, 'asset_name'):
+            details["asset_name"] = txn.asset_name
+        if hasattr(txn, 'total'):
+            details["total_supply"] = txn.total
+            
+        return details
+        
+    def sign_transaction(self, txn, password=None, frontend='cli'):
+        """Handle transaction signing for different frontends"""
         if not self.connected_address:
             raise ValueError("No wallet connected")
+        
+        wallet_data = self._load_wallet_by_address(self.connected_address)
+        if not wallet_data:
+            raise ValueError("Wallet data not found")
         
         # Load wallet data
         wallet_data = self._load_wallet_by_address(self.connected_address)
         if not wallet_data:
             raise ValueError("Wallet data not found")
+            
+        # For Telegram: Return details instead of CLI prompts
+        if frontend == 'telegram' and not password:
+            return {
+                "needs_approval": True,
+                "txn_details": {
+                    "from": txn.sender,
+                    "to": getattr(txn, 'receiver', 'N/A'),
+                    "amount": getattr(txn, 'amt', 0) / 1_000_000,
+                    "type": type(txn).__name__
+                },
+                "unsigned_txn": txn
+            }
         
-        # Display transaction details for user approval
-        print("\n📝 Transaction Details:")
-        if hasattr(txn, 'sender'):
-            print(f"From: {txn.sender}")
-        if hasattr(txn, 'receiver'):
-            print(f"To: {txn.receiver}")
-            print(f"Amount: {txn.amt / 1_000_000} ALGO")
-        elif hasattr(txn, 'index'):
-            print(f"Asset ID: {txn.index}")
-        print(f"Fee: {txn.fee / 1_000_000} ALGO")
+        # For CLI: show details and ask for approval
+        if frontend == 'cli':
+            print("\n📝 Transaction Details:")
+            if hasattr(txn, 'sender'):
+                print(f"From: {txn.sender}")
+            if hasattr(txn, 'receiver'):
+                print(f"To: {txn.receiver}")
+                print(f"Amount: {txn.amt / 1_000_000} ALGO")
+            elif hasattr(txn, 'asset_name'):
+                print(f"Asset Name: {txn.asset_name}")
+            print(f"Fee: {txn.fee / 1_000_000} ALGO")
+            
+            # Request password to decrypt mnemonic
+            password = getpass.getpass("\nEnter your wallet password to sign this transaction: ")
+            
+            # Request explicit approval
+            approval = input("\n⚠️ Do you approve this transaction? (y/n): ")
+            if approval.lower() != 'y':
+                raise ValueError("Transaction rejected by user")
         
-        # Request password to decrypt mnemonic
-        password = getpass.getpass("\nEnter your wallet password to sign this transaction: ")
-        
+        # Sign the transaction
         try:
             # Decrypt mnemonic
             decrypted_mnemonic = self._decrypt_data(wallet_data["encrypted_mnemonic"], password)
             
             # Get private key
             private_key = mnemonic.to_private_key(decrypted_mnemonic)
-            
-            # Request explicit approval
-            approval = input("\n⚠️ Do you approve this transaction? (y/n): ")
-            if approval.lower() != 'y':
-                raise ValueError("Transaction rejected by user")
             
             # Sign transaction
             signed_txn = txn.sign(private_key)
@@ -258,11 +296,11 @@ class WalletManager:
 wallet_manager = WalletManager()
 
 # Convenience functions that use the wallet manager
-def create_wallet():
-    return wallet_manager.create_wallet()
+def create_wallet(password=None):
+    return wallet_manager.create_wallet(password)
 
-def connect_wallet(mnemonic=None):
-    return wallet_manager.connect_wallet(mnemonic)
+def connect_wallet(mnemonic=None, password=None):
+    return wallet_manager.connect_wallet(mnemonic, password)
 
 def disconnect_wallet():
     return wallet_manager.disconnect_wallet()
@@ -273,13 +311,12 @@ def get_connected_wallet():
 def list_wallets():
     return wallet_manager.list_wallets()
 
-def sign_transaction(txn):
-    return wallet_manager.sign_transaction(txn)
+def sign_transaction(txn, password=None, frontend='cli'):
+    return wallet_manager.sign_transaction(txn, password, frontend)
 
 def format_wallet_display(wallet_data):
     """Format wallet data for display (hiding private key)"""
     address = wallet_data["address"]
-    
     # If mnemonic is included (only during wallet creation)
     if "mnemonic" in wallet_data:
         mnemonic_words = wallet_data["mnemonic"].split()
@@ -287,7 +324,6 @@ def format_wallet_display(wallet_data):
             formatted_mnemonic = " ".join(mnemonic_words[:3]) + " ... " + " ".join(mnemonic_words[-3:])
         else:
             formatted_mnemonic = wallet_data["mnemonic"]
-        
         return {
             "address": address,
             "mnemonic_preview": formatted_mnemonic,
