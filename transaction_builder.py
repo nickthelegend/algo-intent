@@ -64,7 +64,7 @@ def build_and_send_transaction(sender, recipient, amount, algod_client, password
             raise e
         raise TransactionError(f"❌ Transaction failed: {str(e)}")
 
-def create_nft(name, unit_name, total_supply, description, algod_client, sender, password=None, frontend='cli'):
+def create_nft(name, unit_name, total_supply, description, algod_client, sender, password=None, frontend='cli', url=None):
     """
     Create an NFT using the connected wallet
     """
@@ -79,21 +79,21 @@ def create_nft(name, unit_name, total_supply, description, algod_client, sender,
         
         # Build unsigned transaction
         txn = AssetConfigTxn(
-            sender=sender,
-            sp=params,
-            total=total_supply,
-            default_frozen=False,
-            unit_name=unit_name,
-            asset_name=name,
-            manager=sender,
-            reserve=sender,
-            freeze=sender,
-            clawback=sender,
-            url="",
-            decimals=0,
-            note=description.encode() if description else None
-        )
-        
+                sender=sender,
+                sp=params,
+                total=total_supply,
+                default_frozen=False,
+                unit_name=unit_name,
+                asset_name=name,
+                manager=sender,
+                reserve=sender,
+                freeze=sender,
+                clawback=sender,
+                url=url or "",  # Add image URL here
+                decimals=0,
+                note=description.encode() if description else None
+            )
+                
         # Sign transaction with appropriate frontend
         sign_result = sign_transaction(txn, password=password, frontend=frontend)
         
