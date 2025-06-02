@@ -16,13 +16,14 @@ class AIIntentParser:
         
         self.system_prompt = """Analyze Algorand-related requests and return JSON with:
 {
-  "intent": "send_algo|create_wallet|connect_wallet|create_nft|disconnect|balance",
+  "intent": "send_algo|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft",
   "parameters": {
     "amount": float,
     "recipient": "address", 
     "name": "string",
     "supply": int,
-    "description": "string"
+    "description": "string",
+    "image_url": "string"
   }
 }
 
@@ -34,7 +35,16 @@ User: "Create a new wallet"
 {"intent": "create_wallet", "parameters": {}}
 
 User: "Check my balance"
-{"intent": "balance", "parameters": {}}"""
+{"intent": "balance", "parameters": {}}
+
+User: "Create NFT named Dragon with this image"
+{"intent": "create_nft_with_image", "parameters": {"name": "Dragon"}}
+
+User: "Mint an NFT called PixelArt with description Cool digital art with supply 100"
+{"intent": "create_nft", "parameters": {"name": "PixelArt", "description": "Cool digital art", "supply": 100}}
+
+User: "Create NFT named Dragon with supply 10"
+{"intent": "create_nft", "parameters": {"name": "Dragon", "supply": 10}}"""
 
     def parse(self, user_input: str) -> Optional[Dict]:
         try:
