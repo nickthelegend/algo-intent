@@ -20,6 +20,8 @@ from ai_intent import AIIntentParser
 from wallet import create_wallet, connect_wallet, disconnect_wallet, get_connected_wallet, sign_transaction
 from transaction_builder import build_and_send_transaction, create_nft
 from utils import get_algod_client, generate_unit_name
+import tempfile
+from ipfs_utils import upload_to_ipfs
 
 # Configuration
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -27,7 +29,7 @@ SESSIONS_FILE = "telegram_sessions.json"
 SECURITY_LOG_FILE = "security_events.log"
 
 # Conversation states
-PASSWORD, MNEMONIC, PASSWORD_FOR_CONNECT, TRANSACTION_PASSWORD = range(4)
+PASSWORD, MNEMONIC, PASSWORD_FOR_CONNECT, TRANSACTION_PASSWORD, IMAGE_HANDLING = range(5)
 
 # Security Configuration
 MAX_MESSAGE_LENGTH = 1000
@@ -270,11 +272,12 @@ async def start(update: Update, context: CallbackContext):
         f"👋 Welcome {user.first_name} to Algo-Intent Bot!\n"
         "🔒 This bot helps you manage Algorand wallets securely.\n\n"
         "Available commands:\n"
-        "• 'Create a new wallet'\n"
-        "• 'Send X ALGO to ADDRESS'\n"
-        "• 'Create NFT named NAME'\n"
-        "• 'Check my balance'\n"
-        "• 'Disconnect my wallet'\n\n"
+        "- 'Create a wallet'\n"
+        "- 'Send 5 ALGO to ADDRESS'\n"
+        "- 'Check balance'\n\n"
+        "📸 **For NFTs with images:**\n"
+        "• Send image WITH caption: 'Create NFT named Dragon with supply 10'\n"
+        "• Or send image first, then describe it"
         "⚠️ Security Notice: Never share your wallet passwords or mnemonic phrases with anyone!\n"
         "🔐 All sensitive information is automatically deleted from chat for your security."
     )
@@ -653,6 +656,18 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
     sessions = load_sessions()
     user_session = sessions.get(str(user_id), {})
     
+    # Add image handling
+    image_url = None
+    if 'nft_image' in context.user_data:
+        try:
+            image_path = context.user_data['nft_image']
+            image_url = upload_to_ipfs(image_path)
+            os.unlink(image_path)  # Cleanup temp file
+            del context.user_data['nft_image']
+        except Exception as e:
+            await update.message.reply_text(f"❌ Image processing error: {str(e)}")
+            return
+    
     try:
         algod_client = get_algod_client()
         result = create_nft(
@@ -662,7 +677,8 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
             description=sanitize_input(params.get('description', "")),
             algod_client=algod_client,
             sender=user_session["address"],
-            frontend='telegram'
+            frontend='telegram',
+            url=image_url  # Add image URL to NFT metadata
         )
         
         if isinstance(result, dict) and result.get('status') == 'awaiting_approval':
@@ -670,16 +686,21 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
             context.user_data['state'] = 'transaction_password'
             context.user_data['transaction_type'] = 'nft'
             
-            log_security_event(user_id, "NFT_CREATION_PENDING", f"Name: {nft_name}")
-            
-            await update.message.reply_text(
+            # Add image info to confirmation message
+            message_text = (
                 f"🎨 **NFT Creation Confirmation**\n\n"
                 f"📛 Name: **{nft_name}**\n"
                 f"📊 Supply: {params.get('supply', 1)}\n"
                 f"📝 Description: {params.get('description', 'None')}\n"
-                f"💸 Fee: ~0.001 ALGO\n\n"
-                f"🔒 Enter your wallet password to create this NFT:\n"
-                f"🔐 Your password will be automatically deleted for security.",
+            )
+            if image_url:
+                message_text += f"🌄 Image: {image_url}\n"
+            message_text += "💸 Fee: ~0.001 ALGO\n\n🔒 Enter your wallet password to create this NFT:"
+            
+            log_security_event(user_id, "NFT_CREATION_PENDING", f"Name: {nft_name}")
+            
+            await update.message.reply_text(
+                message_text,
                 parse_mode="Markdown"
             )
         else:
@@ -689,6 +710,81 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
         logger.error(f"NFT creation failed for user {user_id}: {e}")
         log_security_event(user_id, "NFT_CREATION_FAILED", str(e))
         await update.message.reply_text("❌ Failed to create NFT. Please try again.")
+        
+async def handle_photo(update: Update, context: CallbackContext):
+    """Handle image uploads for NFT creation with caption support"""
+    user_id = update.effective_user.id
+    try:
+        # Get the image
+        photo_file = await update.message.photo[-1].get_file()
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            await photo_file.download_to_drive(temp_file.name)
+            context.user_data['nft_image'] = temp_file.name
+        
+        # Check if user sent a caption with the image
+        caption = update.message.caption
+        if caption:
+            # Try to parse the caption as an NFT intent
+            sanitized_caption = sanitize_input(caption)
+            intent_parser = AIIntentParser()
+            parsed = intent_parser.parse(sanitized_caption)
+            
+            # If caption contains valid NFT intent, process immediately
+            if parsed and parsed.get('intent') == 'create_nft':
+                params = parsed.get('parameters', {})
+                await handle_nft_creation(update, context, params)
+                return ConversationHandler.END
+            
+            # If caption doesn't contain valid NFT intent, try fallback parsing
+            fallback_parsed = parse_nft_command_fallback(sanitized_caption)
+            if fallback_parsed:
+                params = fallback_parsed.get('parameters', {})
+                await handle_nft_creation(update, context, params)
+                return ConversationHandler.END
+            
+            # Caption exists but doesn't contain valid NFT intent
+            await update.message.reply_text(
+                f"📸 Image received! However, I couldn't understand your NFT description: '{caption}'\n"
+                "Please describe your NFT:\n"
+                "Example: 'Create NFT named Dragon with supply 10'"
+            )
+        else:
+            # No caption provided, ask for description
+            await update.message.reply_text(
+                "📸 Image received! Describe your NFT:\n"
+                "Example: 'Create NFT named Dragon with this image'"
+            )
+        
+        return IMAGE_HANDLING
+        
+    except Exception as e:
+        logger.error(f"Image handling failed: {e}")
+        await update.message.reply_text("❌ Failed to process image")
+        return ConversationHandler.END
+
+    
+async def handle_image_state(update: Update, context: CallbackContext):
+    """Handle NFT creation with image"""
+    user_input = sanitize_input(update.message.text)
+    user_id = update.effective_user.id
+    try:
+        intent_parser = AIIntentParser()
+        parsed = intent_parser.parse(user_input)
+        if not parsed or parsed.get('intent') != 'create_nft':
+            await update.message.reply_text("❌ Invalid NFT command")
+            return ConversationHandler.END
+        image_path = context.user_data['nft_image']
+        ipfs_url = upload_to_ipfs(image_path)
+        os.unlink(image_path)
+        params = parsed.get('parameters', {})
+        params['image_url'] = ipfs_url
+        await handle_nft_creation(update, context, params)
+        del context.user_data['nft_image']
+        return ConversationHandler.END
+    except Exception as e:
+        logger.error(f"Image NFT failed: {e}")
+        await update.message.reply_text("❌ NFT creation failed")
+        return ConversationHandler.END
 
 async def handle_balance_check(update: Update, context: CallbackContext):
     """Check wallet balance securely"""
@@ -744,6 +840,12 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
+        states={IMAGE_HANDLING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_image_state)]},
+        fallbacks=[]
+    ))
     
     logger.info("🤖 Secure Bot started! Ready for public use with message security.")
     application.run_polling()
