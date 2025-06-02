@@ -52,6 +52,16 @@ security_handler.setFormatter(logging.Formatter("%(asctime)s - SECURITY - %(mess
 security_logger.addHandler(security_handler)
 security_logger.setLevel(logging.INFO)
 
+async def delete_message_safely(update: Update, context: CallbackContext):
+    """Safely delete a message without raising exceptions"""
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete message: {e}")
+
 def log_security_event(user_id, event_type, details=""):
     """Log security-related events"""
     security_logger.info(f"User {user_id} - {event_type} - {details}")
@@ -95,7 +105,6 @@ def validate_algorand_address(address):
     if not re.match(r'^[A-Z2-7]{58}$', address):
         return False
     
-    # Additional checksum validation would go here
     return True
 
 def check_user_rate_limit(user_id, action_type="general"):
@@ -265,7 +274,8 @@ async def start(update: Update, context: CallbackContext):
         "• 'Create NFT named NAME'\n"
         "• 'Check my balance'\n"
         "• 'Disconnect my wallet'\n\n"
-        "⚠️ Security Notice: Never share your wallet passwords or mnemonic phrases with anyone!"
+        "⚠️ Security Notice: Never share your wallet passwords or mnemonic phrases with anyone!\n"
+        "🔐 All sensitive information is automatically deleted from chat for your security."
     )
 
 async def handle_message(update: Update, context: CallbackContext):
@@ -275,6 +285,7 @@ async def handle_message(update: Update, context: CallbackContext):
     user_input = sanitize_input(update.message.text)
     
     if not user_input:
+        await delete_message_safely(update, context)
         await update.message.reply_text("❌ Invalid input received.")
         return
     
@@ -288,8 +299,8 @@ async def handle_message(update: Update, context: CallbackContext):
     if current_state:
         return await handle_conversation_state(update, context)
     
-    # Log user interaction
-    logger.info(f"User {user_id} ({user.username}): {user_input[:100]}...")
+    # Log user interaction (without sensitive data)
+    logger.info(f"User {user_id} ({user.username}): {user_input[:50]}...")
     
     # Parse intent
     parsed = None
@@ -325,14 +336,16 @@ async def handle_message(update: Update, context: CallbackContext):
             context.user_data['state'] = 'creating_wallet'
             await update.message.reply_text(
                 "🔒 Creating a new wallet...\n"
-                "Please set a secure password (minimum 8 characters):"
+                "Please set a secure password (minimum 8 characters):\n\n"
+                "🔐 Your password will be automatically deleted for security."
             )
         elif intent == 'connect_wallet':
             log_security_event(user_id, "WALLET_CONNECTION_INITIATED")
             context.user_data['state'] = 'connecting_wallet'
             await update.message.reply_text(
                 "🔑 Connecting to existing wallet...\n"
-                "Please enter your 25-word mnemonic phrase:"
+                "Please enter your 25-word mnemonic phrase:\n\n"
+                "🔐 Your mnemonic will be automatically deleted for security."
             )
         elif intent == 'send_algo':
             await handle_send_transaction(update, context, params)
@@ -349,12 +362,13 @@ async def handle_message(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ An error occurred. Please try again later.")
 
 async def handle_conversation_state(update: Update, context: CallbackContext):
-    """Handle conversation states with security validation"""
+    """Handle conversation states with security validation and message deletion"""
     user_id = update.effective_user.id
     state = context.user_data.get('state')
     message_text = sanitize_input(update.message.text)
     
     if not message_text:
+        await delete_message_safely(update, context)
         await update.message.reply_text("❌ Invalid input received.")
         return
     
@@ -363,6 +377,7 @@ async def handle_conversation_state(update: Update, context: CallbackContext):
     if failed_attempts >= MAX_PASSWORD_ATTEMPTS:
         log_security_event(user_id, "MAX_ATTEMPTS_EXCEEDED", f"State: {state}")
         context.user_data.clear()
+        await delete_message_safely(update, context)
         await update.message.reply_text("❌ Too many failed attempts. Please start over.")
         return
     
@@ -376,11 +391,15 @@ async def handle_conversation_state(update: Update, context: CallbackContext):
         await handle_transaction_password(update, context, message_text)
     else:
         context.user_data.clear()
+        await delete_message_safely(update, context)
         await update.message.reply_text("❌ Invalid state. Please start over.")
 
 async def handle_wallet_creation_password(update: Update, context: CallbackContext, password: str):
-    """Handle wallet creation with password validation"""
+    """Handle wallet creation with password validation and secure message deletion"""
     user_id = update.effective_user.id
+    
+    # Delete the password message immediately
+    await delete_message_safely(update, context)
     
     # Validate password strength
     if len(password) < 8:
@@ -404,13 +423,19 @@ async def handle_wallet_creation_password(update: Update, context: CallbackConte
         
         log_security_event(user_id, "WALLET_CREATED", f"Address: {wallet_data['address']}")
         
+        # Send mnemonic with spoiler formatting and security warning
         await update.message.reply_text(
             "✅ Wallet created successfully!\n\n"
-            f"📍 Address: `{wallet_data['address']}`\n\n"
-            f"🔑 **IMPORTANT - Save this mnemonic phrase:**\n"
-            f"`{wallet_data['mnemonic']}`\n\n"
-            "⚠️ **WARNING**: This mnemonic will not be shown again!\n"
-            "Store it safely and never share it with anyone.",
+            f"📍 **Address:** `{wallet_data['address']}`\n\n"
+            f"🔑 **MNEMONIC PHRASE (tap to reveal):**\n"
+            f"||{wallet_data['mnemonic']}||\n\n"
+            "⚠️ **CRITICAL SECURITY WARNING:**\n"
+            "• Save this mnemonic phrase immediately\n"
+            "• Store it in a secure location offline\n"
+            "• Never share it with anyone\n"
+            "• This is the ONLY way to recover your wallet\n"
+            "• Consider writing it down on paper\n\n"
+            "🔐 The mnemonic above is hidden for security. Tap it to reveal.",
             parse_mode="Markdown"
         )
         context.user_data.clear()
@@ -418,6 +443,58 @@ async def handle_wallet_creation_password(update: Update, context: CallbackConte
         logger.error(f"Wallet creation failed for user {user_id}: {e}")
         log_security_event(user_id, "WALLET_CREATION_FAILED", str(e))
         await update.message.reply_text("❌ Failed to create wallet. Please try again.")
+        context.user_data.clear()
+
+async def handle_mnemonic_input(update: Update, context: CallbackContext, mnemonic: str):
+    """Handle mnemonic input securely with immediate deletion"""
+    # Delete the mnemonic message immediately
+    await delete_message_safely(update, context)
+    
+    # Validate mnemonic format
+    words = mnemonic.strip().split()
+    if len(words) != 25:
+        await update.message.reply_text("❌ Invalid mnemonic. Must be exactly 25 words.")
+        return
+    
+    context.user_data['mnemonic'] = mnemonic
+    context.user_data['state'] = 'connecting_password'
+    await update.message.reply_text(
+        "🔒 Please set a password to secure this wallet:\n\n"
+        "🔐 Your password will be automatically deleted for security."
+    )
+
+async def handle_connection_password(update: Update, context: CallbackContext, password: str):
+    """Handle wallet connection password with secure deletion"""
+    user_id = update.effective_user.id
+    mnemonic = context.user_data.get('mnemonic')
+    
+    # Delete the password message immediately
+    await delete_message_safely(update, context)
+    
+    try:
+        wallet_data = connect_wallet(mnemonic, password)
+        sessions = load_sessions()
+        sessions[str(user_id)] = {
+            "address": wallet_data["address"],
+            "encrypted_mnemonic": wallet_data["encrypted_mnemonic"],
+            "connected_at": datetime.now().isoformat(),
+            "last_activity": datetime.now().isoformat()
+        }
+        save_sessions(sessions)
+        
+        log_security_event(user_id, "WALLET_CONNECTED", f"Address: {wallet_data['address']}")
+        
+        await update.message.reply_text(
+            f"✅ **Wallet Connected Successfully!**\n"
+            f"📍 Address: `{wallet_data['address']}`\n\n"
+            f"🔐 All sensitive information has been securely processed and deleted from chat.",
+            parse_mode="Markdown"
+        )
+        context.user_data.clear()
+    except Exception as e:
+        logger.error(f"Wallet connection failed for user {user_id}: {e}")
+        log_security_event(user_id, "WALLET_CONNECTION_FAILED", str(e))
+        await update.message.reply_text("❌ Failed to connect wallet. Please check your mnemonic and try again.")
         context.user_data.clear()
 
 async def handle_send_transaction(update: Update, context: CallbackContext, params: dict):
@@ -474,7 +551,8 @@ async def handle_send_transaction(update: Update, context: CallbackContext, para
                 f"💰 Amount: **{params['amount']} ALGO**\n"
                 f"📍 To: `{params['recipient']}`\n"
                 f"💸 Fee: ~0.001 ALGO\n\n"
-                f"🔒 Enter your wallet password to confirm:",
+                f"🔒 Enter your wallet password to confirm:\n"
+                f"🔐 Your password will be automatically deleted for security.",
                 parse_mode="Markdown"
             )
         else:
@@ -486,8 +564,11 @@ async def handle_send_transaction(update: Update, context: CallbackContext, para
         await update.message.reply_text("❌ Transaction failed. Please check your balance and try again.")
 
 async def handle_transaction_password(update: Update, context: CallbackContext, password: str):
-    """Handle transaction password with security checks"""
+    """Handle transaction password with security checks and message deletion"""
     user_id = update.effective_user.id
+    
+    # Delete the password message immediately
+    await delete_message_safely(update, context)
     
     try:
         pending_txn = context.user_data.get('pending_txn')
@@ -584,7 +665,8 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
                 f"📊 Supply: {params.get('supply', 1)}\n"
                 f"📝 Description: {params.get('description', 'None')}\n"
                 f"💸 Fee: ~0.001 ALGO\n\n"
-                f"🔒 Enter your wallet password to create this NFT:",
+                f"🔒 Enter your wallet password to create this NFT:\n"
+                f"🔐 Your password will be automatically deleted for security.",
                 parse_mode="Markdown"
             )
         else:
@@ -635,48 +717,6 @@ async def handle_disconnect(update: Update, context: CallbackContext):
     context.user_data.clear()
     await update.message.reply_text("✅ Wallet disconnected securely")
 
-async def handle_mnemonic_input(update: Update, context: CallbackContext, mnemonic: str):
-    """Handle mnemonic input securely"""
-    # Validate mnemonic format
-    words = mnemonic.strip().split()
-    if len(words) != 25:
-        await update.message.reply_text("❌ Invalid mnemonic. Must be exactly 25 words.")
-        return
-    
-    context.user_data['mnemonic'] = mnemonic
-    context.user_data['state'] = 'connecting_password'
-    await update.message.reply_text("🔒 Please set a password to secure this wallet:")
-
-async def handle_connection_password(update: Update, context: CallbackContext, password: str):
-    """Handle wallet connection password"""
-    user_id = update.effective_user.id
-    mnemonic = context.user_data.get('mnemonic')
-    
-    try:
-        wallet_data = connect_wallet(mnemonic, password)
-        sessions = load_sessions()
-        sessions[str(user_id)] = {
-            "address": wallet_data["address"],
-            "encrypted_mnemonic": wallet_data["encrypted_mnemonic"],
-            "connected_at": datetime.now().isoformat(),
-            "last_activity": datetime.now().isoformat()
-        }
-        save_sessions(sessions)
-        
-        log_security_event(user_id, "WALLET_CONNECTED", f"Address: {wallet_data['address']}")
-        
-        await update.message.reply_text(
-            f"✅ **Wallet Connected Successfully!**\n"
-            f"📍 Address: `{wallet_data['address']}`",
-            parse_mode="Markdown"
-        )
-        context.user_data.clear()
-    except Exception as e:
-        logger.error(f"Wallet connection failed for user {user_id}: {e}")
-        log_security_event(user_id, "WALLET_CONNECTION_FAILED", str(e))
-        await update.message.reply_text("❌ Failed to connect wallet. Please check your mnemonic and try again.")
-        context.user_data.clear()
-
 def main():
     """Start the bot with security logging"""
     if not BOT_TOKEN:
@@ -684,7 +724,7 @@ def main():
         return
     
     logger.info("Starting Algo-Intent Bot with enhanced security")
-    security_logger.info("Bot started with public access enabled")
+    security_logger.info("Bot started with public access and message security enabled")
     
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
@@ -692,7 +732,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logger.info("🤖 Secure Bot started! Ready for public use.")
+    logger.info("🤖 Secure Bot started! Ready for public use with message security.")
     application.run_polling()
 
 if __name__ == "__main__":
