@@ -5,7 +5,7 @@ import re
 import hashlib
 import time
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, MessageEntity
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -14,6 +14,7 @@ from telegram.ext import (
     CallbackContext,
     ConversationHandler
 )
+from telegram.constants import ParseMode
 from functools import wraps
 from ai_intent import AIIntentParser
 from wallet import create_wallet, connect_wallet, disconnect_wallet, get_connected_wallet, sign_transaction
@@ -423,12 +424,23 @@ async def handle_wallet_creation_password(update: Update, context: CallbackConte
         
         log_security_event(user_id, "WALLET_CREATED", f"Address: {wallet_data['address']}")
         
-        # Send mnemonic with spoiler formatting and security warning
+        # Send wallet creation confirmation
         await update.message.reply_text(
-            "✅ Wallet created successfully!\n\n"
+            "✅ **Wallet created successfully!**\n\n"
             f"📍 **Address:** `{wallet_data['address']}`\n\n"
-            f"🔑 **MNEMONIC PHRASE (tap to reveal):**\n"
-            f"||{wallet_data['mnemonic']}||\n\n"
+            "🔑 **Your mnemonic phrase is below (tap to reveal):**",
+            parse_mode="Markdown"
+        )
+        
+        # Send mnemonic as spoiler using MessageEntity
+        mnemonic = wallet_data['mnemonic']
+        await update.message.reply_text(
+            mnemonic,
+            entities=[MessageEntity(MessageEntity.SPOILER, 0, len(mnemonic))]
+        )
+        
+        # Send security warning
+        await update.message.reply_text(
             "⚠️ **CRITICAL SECURITY WARNING:**\n"
             "• Save this mnemonic phrase immediately\n"
             "• Store it in a secure location offline\n"
@@ -438,6 +450,7 @@ async def handle_wallet_creation_password(update: Update, context: CallbackConte
             "🔐 The mnemonic above is hidden for security. Tap it to reveal.",
             parse_mode="Markdown"
         )
+        
         context.user_data.clear()
     except Exception as e:
         logger.error(f"Wallet creation failed for user {user_id}: {e}")
