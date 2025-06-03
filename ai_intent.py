@@ -24,6 +24,7 @@ class AIIntentParser:
     "supply": int,
     "description": "string",
     "image_url": "string"
+    "asset_id": int
   }
 }
 
@@ -52,7 +53,13 @@ User: "Make NFT with name 'Demon Slayer' and supply 2"
 {"intent": "create_nft", "parameters": {"name": "Demon Slayer", "supply": 2}}
 
 User: "create an nft with this image named \"CoolArt\""
-{"intent": "create_nft", "parameters": {"name": "CoolArt"}}"""
+{"intent": "create_nft", "parameters": {"name": "CoolArt"}}
+
+User: "Opt-in to NFT 123456"
+{"intent": "opt_in", "parameters": {"asset_id": 123456}}
+
+User: "Opt out of asset 654321"
+{"intent": "opt_out", "parameters": {"asset_id": 654321}}"""
 
     def parse(self, user_input: str) -> Optional[Dict]:
         try:
