@@ -27,6 +27,8 @@ class AIIntentParser:
   }
 }
 
+IMPORTANT: For NFT creation, extract the actual name from various phrasings:
+
 Examples:
 User: "Hey, send 3 ALGO to K54ZTTHNDB..."
 {"intent": "send_algo", "parameters": {"amount": 3, "recipient": "K54ZTTHNDB..."}}
@@ -37,14 +39,20 @@ User: "Create a new wallet"
 User: "Check my balance"
 {"intent": "balance", "parameters": {}}
 
-User: "Create NFT named Dragon with this image"
-{"intent": "create_nft_with_image", "parameters": {"name": "Dragon"}}
+User: "Create NFT named Dragon"
+{"intent": "create_nft", "parameters": {"name": "Dragon"}}
 
-User: "Mint an NFT called PixelArt with description Cool digital art with supply 100"
-{"intent": "create_nft", "parameters": {"name": "PixelArt", "description": "Cool digital art", "supply": 100}}
+User: "create an nft with this image named 'based'"
+{"intent": "create_nft", "parameters": {"name": "based"}}
 
-User: "Create NFT named Dragon with supply 10"
-{"intent": "create_nft", "parameters": {"name": "Dragon", "supply": 10}}"""
+User: "Create an NFT called PixelArt with supply 100"
+{"intent": "create_nft", "parameters": {"name": "PixelArt", "supply": 100}}
+
+User: "Make NFT with name 'Demon Slayer' and supply 2"
+{"intent": "create_nft", "parameters": {"name": "Demon Slayer", "supply": 2}}
+
+User: "create an nft with this image named \"CoolArt\""
+{"intent": "create_nft", "parameters": {"name": "CoolArt"}}"""
 
     def parse(self, user_input: str) -> Optional[Dict]:
         try:
