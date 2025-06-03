@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 from functools import wraps
 from ai_intent import AIIntentParser
 from wallet import create_wallet, connect_wallet, disconnect_wallet, get_connected_wallet, sign_transaction
-from transaction_builder import build_and_send_transaction, create_nft
+from transaction_builder import build_and_send_transaction, create_nft, opt_in_to_asset, opt_out_of_asset
 from utils import get_algod_client, generate_unit_name
 import tempfile
 from ipfs_utils import upload_to_ipfs
@@ -382,6 +382,10 @@ async def handle_message(update: Update, context: CallbackContext):
             await handle_send_transaction(update, context, params)
         elif intent == 'create_nft':
             await handle_nft_creation(update, context, params)
+        elif intent == 'opt_in':
+            await handle_opt_in(update, context, params)
+        elif intent == 'opt_out':
+            await handle_opt_out(update, context, params)
         elif intent == 'disconnect':
             await handle_disconnect(update, context)
         elif intent == 'balance':
@@ -612,50 +616,59 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
     
     # Delete the password message immediately
     await delete_message_safely(update, context)
-    
+
     try:
         pending_txn = context.user_data.get('pending_txn')
         transaction_type = context.user_data.get('transaction_type', 'send')
-        
+
         if not pending_txn:
             await update.message.reply_text("❌ No pending transaction found.")
             context.user_data.clear()
             return
-        
+
+        # Sign and send transaction (existing code)
         signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
         algod_client = get_algod_client()
         txid = algod_client.send_transaction(signed_txn)
-        
-        if transaction_type == 'nft':
+
+        # Add this block for opt-in/out handling
+        if transaction_type == 'opt_in':
+            log_security_event(user_id, "ASSET_OPT_IN", f"TxID: {txid}")
+            await update.message.reply_text(f"✅ Opt-in successful! TxID: `{txid}`", parse_mode="Markdown")
+            
+        elif transaction_type == 'opt_out':
+            log_security_event(user_id, "ASSET_OPT_OUT", f"TxID: {txid}")
+            await update.message.reply_text(f"✅ Opt-out successful! TxID: `{txid}`", parse_mode="Markdown")
+            
+        elif transaction_type == 'nft':
+            # Existing NFT handling code
             from algosdk.transaction import wait_for_confirmation
             confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
             asset_id = confirmed_txn["asset-index"]
-            
             log_security_event(user_id, "NFT_CREATED", f"Asset ID: {asset_id}, TxID: {txid}")
-            
             await update.message.reply_text(
                 f"✅ **NFT Created Successfully!**\n"
                 f"🎨 Asset ID: `{asset_id}`\n"
                 f"📄 Transaction ID: `{txid}`",
                 parse_mode="Markdown"
             )
-        else:
+        else:  # Default case for regular transactions
             log_security_event(user_id, "TRANSACTION_SIGNED", f"TxID: {txid}")
-            
             await update.message.reply_text(
                 f"✅ **Transaction Successful!**\n"
                 f"📄 Transaction ID: `{txid}`",
                 parse_mode="Markdown"
             )
-        
+
         context.user_data.clear()
+
     except Exception as e:
+        # Existing error handling code
         failed_attempts = context.user_data.get('failed_attempts', 0) + 1
         context.user_data['failed_attempts'] = failed_attempts
-        
         logger.error(f"Transaction signing failed for user {user_id}: {e}")
         log_security_event(user_id, "TRANSACTION_SIGN_FAILED", f"Attempt {failed_attempts}")
-        
+
         if failed_attempts >= MAX_PASSWORD_ATTEMPTS:
             context.user_data.clear()
             await update.message.reply_text("❌ Too many failed password attempts. Transaction cancelled.")
@@ -820,6 +833,79 @@ async def handle_image_state(update: Update, context: CallbackContext):
         logger.error(f"Image NFT failed: {e}")
         await update.message.reply_text("❌ NFT creation failed")
         return ConversationHandler.END
+    
+async def handle_opt_in(update: Update, context: CallbackContext, params: dict):
+    user_id = update.effective_user.id
+    if not validate_session(user_id):
+        await update.message.reply_text("❌ Please connect a wallet first!")
+        return
+    sessions = load_sessions()
+    user_session = sessions.get(str(user_id), {})
+    try:
+        asset_id = int(params['asset_id'])
+    except Exception:
+        await update.message.reply_text("❌ Invalid asset ID. Please provide a valid number.")
+        return
+    try:
+        algod_client = get_algod_client()
+        result = opt_in_to_asset(
+            sender=user_session["address"],
+            asset_id=asset_id,
+            algod_client=algod_client,
+            frontend='telegram'
+        )
+        if result.get('status') == 'awaiting_approval':
+            context.user_data['pending_txn'] = result['unsigned_txn']
+            context.user_data['state'] = 'transaction_password'
+            context.user_data['transaction_type'] = 'opt_in'
+            await update.message.reply_text(
+                f"🔗 **Opt-In Confirmation**\n\n"
+                f"🆔 Asset ID: {asset_id}\n"
+                f"💸 Fee: ~0.001 ALGO\n\n"
+                f"🔒 Enter your wallet password to confirm opt-in:",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(f"✅ Successfully opted in to asset {asset_id}!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Opt-in failed: {str(e)}")
+
+async def handle_opt_out(update: Update, context: CallbackContext, params: dict):
+    user_id = update.effective_user.id
+    if not validate_session(user_id):
+        await update.message.reply_text("❌ Please connect a wallet first!")
+        return
+    sessions = load_sessions()
+    user_session = sessions.get(str(user_id), {})
+    try:
+        asset_id = int(params['asset_id'])
+    except Exception:
+        await update.message.reply_text("❌ Invalid asset ID. Please provide a valid number.")
+        return
+    try:
+        algod_client = get_algod_client()
+        result = opt_out_of_asset(
+            sender=user_session["address"],
+            asset_id=asset_id,
+            algod_client=algod_client,
+            frontend='telegram'
+        )
+        if result.get('status') == 'awaiting_approval':
+            context.user_data['pending_txn'] = result['unsigned_txn']
+            context.user_data['state'] = 'transaction_password'
+            context.user_data['transaction_type'] = 'opt_out'
+            await update.message.reply_text(
+                f"🔗 **Opt-Out Confirmation**\n\n"
+                f"🆔 Asset ID: {asset_id}\n"
+                f"💸 Fee: ~0.001 ALGO\n\n"
+                f"🔒 Enter your wallet password to confirm opt-out:",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(f"✅ Successfully opted out of asset {asset_id}!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Opt-out failed: {str(e)}")
+
 
 async def handle_balance_check(update: Update, context: CallbackContext):
     """Check wallet balance securely"""
