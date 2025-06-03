@@ -198,31 +198,58 @@ def save_sessions(sessions):
         logger.error(f"Failed to save sessions: {e}")
 
 def parse_nft_command_fallback(text):
-    """Secure fallback NFT parser"""
+    """Enhanced fallback NFT parser with better name extraction"""
     text = sanitize_input(text)
     if not text:
         return None
     
+    # Remove quotes to normalize
+    normalized_text = re.sub(r'["\']', '', text)
+    
+    # Enhanced patterns to capture NFT names more accurately
     patterns = [
-        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+name\s+|named\s+|called\s+)?(?P<name>[a-zA-Z0-9\s]{1,50})",
-        r"(?i)(?:help\s+me\s+)?(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+name\s+|named\s+|called\s+)?(?P<name>[a-zA-Z0-9\s]{1,50})",
-        r"(?i)(create|mint|make)\s+(?P<name>[a-zA-Z0-9\s]{1,50})\s+nft"
+        # Pattern 1: "create/mint/make NFT named/called 'NAME'"
+        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+(?:this\s+)?image\s+)?(?:named|called)\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?",
+        
+        # Pattern 2: "create/mint/make NFT with name 'NAME'"
+        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+(?:this\s+)?image\s+)?with\s+name\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?",
+        
+        # Pattern 3: Direct name pattern "create NFT NAME"
+        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+([a-zA-Z0-9\s]{1,50}?)(?:\s+with|\s+supply|\s*$)",
+        
+        # Pattern 4: "NFT named NAME" (general catch)
+        r"(?i)nft\s+(?:named|called)\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?"
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, normalized_text)
         if match:
-            name = sanitize_input(match.group('name'))
-            if name and len(name.strip()) > 0:
+            # Get the name from the appropriate capture group
+            if len(match.groups()) >= 2:
+                name = match.group(2).strip()
+            else:
+                name = match.group(1).strip()
+            
+            if name and len(name) > 0:
+                # Extract supply if mentioned
+                supply_match = re.search(r'(?:supply|copies?|quantity)\s+(\d+)', text, re.IGNORECASE)
+                supply = int(supply_match.group(1)) if supply_match else 1
+                
+                # Extract description if mentioned
+                desc_match = re.search(r'(?:with\s+description|description)\s+([^,]+)', text, re.IGNORECASE)
+                description = desc_match.group(1).strip() if desc_match else ""
+                
                 return {
                     'intent': 'create_nft',
                     'parameters': {
-                        'name': name.strip(),
-                        'supply': 1,
-                        'description': ''
+                        'name': name,
+                        'supply': supply,
+                        'description': description
                     }
                 }
+    
     return None
+
 
 def parse_send_command_fallback(text):
     """Secure fallback send parser"""
@@ -724,21 +751,30 @@ async def handle_photo(update: Update, context: CallbackContext):
         # Check if user sent a caption with the image
         caption = update.message.caption
         if caption:
+            print(f"DEBUG: Original caption: '{caption}'")  # Debug log
+            
             # Try to parse the caption as an NFT intent
             sanitized_caption = sanitize_input(caption)
+            print(f"DEBUG: Sanitized caption: '{sanitized_caption}'")  # Debug log
+            
             intent_parser = AIIntentParser()
             parsed = intent_parser.parse(sanitized_caption)
+            print(f"DEBUG: AI parsed result: {parsed}")  # Debug log
             
             # If caption contains valid NFT intent, process immediately
             if parsed and parsed.get('intent') == 'create_nft':
                 params = parsed.get('parameters', {})
+                print(f"DEBUG: Extracted parameters: {params}")  # Debug log
                 await handle_nft_creation(update, context, params)
                 return ConversationHandler.END
             
             # If caption doesn't contain valid NFT intent, try fallback parsing
             fallback_parsed = parse_nft_command_fallback(sanitized_caption)
+            print(f"DEBUG: Fallback parsed result: {fallback_parsed}")  # Debug log
+            
             if fallback_parsed:
                 params = fallback_parsed.get('parameters', {})
+                print(f"DEBUG: Fallback extracted parameters: {params}")  # Debug log
                 await handle_nft_creation(update, context, params)
                 return ConversationHandler.END
             
@@ -762,7 +798,6 @@ async def handle_photo(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Failed to process image")
         return ConversationHandler.END
 
-    
 async def handle_image_state(update: Update, context: CallbackContext):
     """Handle NFT creation with image"""
     user_input = sanitize_input(update.message.text)
