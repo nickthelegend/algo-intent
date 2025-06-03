@@ -1,4 +1,4 @@
-from algosdk.transaction import PaymentTxn, AssetConfigTxn, wait_for_confirmation
+from algosdk.transaction import PaymentTxn, AssetConfigTxn, AssetTransferTxn, wait_for_confirmation
 from utils import validate_address, check_account_balance
 from wallet import sign_transaction
 
@@ -116,3 +116,48 @@ def create_nft(name, unit_name, total_supply, description, algod_client, sender,
         
     except Exception as e:
         raise NFTCreationError(f"❌ NFT creation failed: {e}")
+    
+def opt_in_to_asset(sender, asset_id, algod_client, password=None, frontend='cli'):
+    """
+    Opt-in to an Algorand ASA/NFT.
+    """
+    params = algod_client.suggested_params()
+    txn = AssetTransferTxn(
+        sender=sender,
+        sp=params,
+        receiver=sender,
+        amt=0,
+        index=asset_id
+    )
+    sign_result = sign_transaction(txn, password=password, frontend=frontend)
+    if isinstance(sign_result, dict) and sign_result.get("needs_approval"):
+        return {
+            'status': 'awaiting_approval',
+            'unsigned_txn': sign_result['unsigned_txn'],
+            'txn_details': sign_result['txn_details']
+        }
+    txid = algod_client.send_transaction(sign_result)
+    return {'status': 'success', 'txid': txid}
+
+def opt_out_of_asset(sender, asset_id, algod_client, password=None, frontend='cli'):
+    """
+    Opt-out of an Algorand ASA/NFT (must have zero balance).
+    """
+    params = algod_client.suggested_params()
+    txn = AssetTransferTxn(
+        sender=sender,
+        sp=params,
+        receiver=sender,
+        amt=0,
+        index=asset_id,
+        close_assets_to=sender
+    )
+    sign_result = sign_transaction(txn, password=password, frontend=frontend)
+    if isinstance(sign_result, dict) and sign_result.get("needs_approval"):
+        return {
+            'status': 'awaiting_approval',
+            'unsigned_txn': sign_result['unsigned_txn'],
+            'txn_details': sign_result['txn_details']
+        }
+    txid = algod_client.send_transaction(sign_result)
+    return {'status': 'success', 'txid': txid}
