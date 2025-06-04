@@ -19,7 +19,7 @@ from functools import wraps
 from ai_intent import AIIntentParser
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from wallet import create_wallet, connect_wallet, sign_transaction
-from transaction_builder import build_and_send_transaction, create_nft, opt_in_to_asset, opt_out_of_asset
+from transaction_builder import build_and_send_transaction, build_and_send_multi_transaction, create_nft, opt_in_to_asset, opt_out_of_asset
 from utils import get_algod_client, generate_unit_name
 import tempfile
 from ipfs_utils import upload_to_ipfs
@@ -419,6 +419,8 @@ async def handle_message(update: Update, context: CallbackContext):
             )
         elif intent == 'send_algo':
             await handle_send_transaction(update, context, params)
+        elif intent == 'send_algo_multi':
+            await handle_multi_send_transaction(update, context, params)
         elif intent == 'create_nft':
             await handle_nft_creation(update, context, params)
         elif intent == 'opt_in':
@@ -649,6 +651,82 @@ async def handle_send_transaction(update: Update, context: CallbackContext, para
         log_security_event(user_id, "TRANSACTION_FAILED", str(e))
         await update.message.reply_text("❌ Transaction failed. Please check your balance and try again.")
 
+async def handle_multi_send_transaction(update: Update, context: CallbackContext, params: dict):
+    """Handle multi-recipient send transaction"""
+    user_id = update.effective_user.id
+    
+    # Validate session
+    if not validate_session(user_id):
+        await update.message.reply_text("❌ Please connect a wallet first!")
+        return
+    
+    # Check transaction rate limit
+    if not check_user_rate_limit(user_id, "transaction"):
+        await update.message.reply_text("⏱️ Transaction rate limit exceeded.")
+        return
+    
+    # Validate parameters
+    if 'recipients' not in params or not params['recipients']:
+        await update.message.reply_text("❌ Missing recipient details.")
+        return
+    
+    recipients = params['recipients']
+    if len(recipients) < 2:
+        await update.message.reply_text("❌ Multi-recipient transfer requires at least 2 recipients.")
+        return
+    
+    # Validate each recipient
+    for i, recipient in enumerate(recipients):
+        if not validate_algorand_address(recipient['address']):
+            await update.message.reply_text(f"❌ Invalid address for recipient #{i+1}")
+            return
+        if recipient['amount'] <= 0 or recipient['amount'] > 1000000:
+            await update.message.reply_text(f"❌ Invalid amount for recipient #{i+1}")
+            return
+    
+    sessions = load_sessions()
+    user_session = sessions.get(str(user_id), {})
+    
+    try:
+        algod_client = get_algod_client()
+        result = build_and_send_multi_transaction(
+            sender=user_session["address"],
+            recipients=recipients,
+            algod_client=algod_client,
+            frontend='telegram'
+        )
+        
+        if result.get('status') == 'awaiting_approval':
+            context.user_data['pending_txns'] = result['unsigned_txns']
+            context.user_data['state'] = 'transaction_password'
+            context.user_data['transaction_type'] = 'multi_send'
+            context.user_data['recipients'] = recipients
+            
+            # Build confirmation message
+            message_lines = [
+                "📝 **Multi-Recipient Transfer Confirmation**\n",
+                f"👥 **Recipients: {len(recipients)}**",
+                f"💰 **Total Amount: {result['total_amount']:.6f} ALGO**\n"
+            ]
+            
+            for i, recipient in enumerate(recipients, 1):
+                message_lines.append(f"**{i}.** `{recipient['address'][:8]}...{recipient['address'][-8:]}` → **{recipient['amount']:.6f} ALGO**")
+            
+            message_lines.extend([
+                f"\n💸 **Total Fee: ~{len(recipients) * 0.001:.3f} ALGO**",
+                "\n🔒 Enter your wallet password to confirm:"
+            ])
+            
+            await update.message.reply_text(
+                "\n".join(message_lines),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(f"✅ {result['message']}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
 async def handle_transaction_password(update: Update, context: CallbackContext, password: str):
     """Handle transaction password with security checks and message deletion"""
     user_id = update.effective_user.id
@@ -658,29 +736,57 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
 
     try:
         pending_txn = context.user_data.get('pending_txn')
+        pending_txns = context.user_data.get('pending_txns')  # NEW: Multi-transaction support
         transaction_type = context.user_data.get('transaction_type', 'send')
 
-        if not pending_txn:
+        if not pending_txn and not pending_txns:  # UPDATED: Check both
             await update.message.reply_text("❌ No pending transaction found.")
             context.user_data.clear()
             return
 
-        # Sign and send transaction (existing code)
-        signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
         algod_client = get_algod_client()
-        txid = algod_client.send_transaction(signed_txn)
 
         # Add this block for opt-in/out handling
         if transaction_type == 'opt_in':
+            signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
+            txid = algod_client.send_transaction(signed_txn)
             log_security_event(user_id, "ASSET_OPT_IN", f"TxID: {txid}")
             await update.message.reply_text(f"✅ Opt-in successful! TxID: `{txid}`", parse_mode="Markdown")
             
         elif transaction_type == 'opt_out':
+            signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
+            txid = algod_client.send_transaction(signed_txn)
             log_security_event(user_id, "ASSET_OPT_OUT", f"TxID: {txid}")
             await update.message.reply_text(f"✅ Opt-out successful! TxID: `{txid}`", parse_mode="Markdown")
             
+        elif transaction_type == 'multi_send':  # NEW: Multi-recipient handling
+            # Handle multi-recipient transactions
+            recipients = context.user_data.get('recipients', [])
+            
+            # Sign all transactions in the group
+            signed_txns = []
+            for txn in pending_txns:
+                signed_txn = sign_transaction(txn, password=password, frontend='telegram')
+                signed_txns.append(signed_txn)
+            
+            # Send the atomic transfer group
+            txid = algod_client.send_transactions(signed_txns)
+            
+            total_amount = sum(r['amount'] for r in recipients)
+            log_security_event(user_id, "MULTI_SEND_COMPLETED", f"Recipients: {len(recipients)}, Total: {total_amount} ALGO, TxID: {txid}")
+            
+            await update.message.reply_text(
+                f"✅ **Multi-Recipient Transfer Successful!**\n"
+                f"👥 **{len(recipients)} recipients**\n"
+                f"💰 **Total: {total_amount:.6f} ALGO**\n"
+                f"📄 **Group TxID:** `{txid}`",
+                parse_mode="Markdown"
+            )
+            
         elif transaction_type == 'nft':
             # Existing NFT handling code
+            signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
+            txid = algod_client.send_transaction(signed_txn)
             from algosdk.transaction import wait_for_confirmation
             confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
             asset_id = confirmed_txn["asset-index"]
@@ -692,6 +798,8 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
                 parse_mode="Markdown"
             )
         else:  # Default case for regular transactions
+            signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
+            txid = algod_client.send_transaction(signed_txn)
             log_security_event(user_id, "TRANSACTION_SIGNED", f"TxID: {txid}")
             await update.message.reply_text(
                 f"✅ **Transaction Successful!**\n"
