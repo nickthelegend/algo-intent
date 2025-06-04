@@ -1,4 +1,4 @@
-from algosdk.transaction import PaymentTxn, AssetConfigTxn, AssetTransferTxn, wait_for_confirmation
+from algosdk.transaction import PaymentTxn, AssetConfigTxn, AssetTransferTxn, wait_for_confirmation, assign_group_id
 from utils import validate_address, check_account_balance
 from wallet import sign_transaction
 
@@ -63,6 +63,76 @@ def build_and_send_transaction(sender, recipient, amount, algod_client, password
         if isinstance(e, TransactionError):
             raise e
         raise TransactionError(f"❌ Transaction failed: {str(e)}")
+    
+def build_and_send_multi_transaction(sender, recipients, algod_client, password=None, frontend='cli'):
+    """
+    Build and send atomic transfer to multiple recipients
+    recipients: [{"address": "...", "amount": 5.0}, ...]
+    """
+    if not recipients or len(recipients) < 2:
+        raise TransactionError("❌ Multi-recipient transfer requires at least 2 recipients.")
+    
+    # Validate all recipients
+    for i, recipient in enumerate(recipients):
+        if not validate_address(recipient['address']):
+            raise TransactionError(f"❌ Invalid recipient address #{i+1}")
+        if recipient['amount'] <= 0:
+            raise TransactionError(f"❌ Invalid amount for recipient #{i+1}")
+    
+    # Calculate total amount
+    total_amount = sum(r['amount'] for r in recipients)
+    
+    # Check balance
+    has_sufficient_funds, balance = check_account_balance(sender, total_amount, algod_client)
+    if not has_sufficient_funds:
+        raise TransactionError(f"❌ Insufficient balance. Available: {balance:.6f} ALGO, Required: {total_amount:.6f} ALGO")
+    
+    try:
+        # Get suggested parameters
+        params = algod_client.suggested_params()
+        
+        # Create unsigned transactions for each recipient
+        unsigned_txns = []
+        for recipient in recipients:
+            amount_microalgos = int(recipient['amount'] * 1_000_000)
+            txn = PaymentTxn(
+                sender=sender,
+                sp=params,
+                receiver=recipient['address'],
+                amt=amount_microalgos
+            )
+            unsigned_txns.append(txn)
+        
+        # Group the transactions (this makes them atomic)
+        grouped_txns = assign_group_id(unsigned_txns)
+        
+        if frontend == 'telegram':
+            return {
+                'status': 'awaiting_approval',
+                'unsigned_txns': grouped_txns,
+                'recipients': recipients,
+                'total_amount': total_amount
+            }
+        
+        # For CLI: sign all transactions
+        signed_txns = []
+        for txn in grouped_txns:
+            signed_txn = sign_transaction(txn, password=password, frontend=frontend)
+            signed_txns.append(signed_txn)
+        
+        # Send the group
+        txid = algod_client.send_transactions(signed_txns)
+        
+        return {
+            'status': 'success',
+            'txid': txid,
+            'message': f"✅ Multi-recipient transfer successful! {len(recipients)} payments sent. TxID: {txid}",
+            'recipients': recipients,
+            'total_amount': total_amount
+        }
+        
+    except Exception as e:
+        raise TransactionError(f"❌ Multi-recipient transfer failed: {str(e)}")
 
 def create_nft(name, unit_name, total_supply, description, algod_client, sender, password=None, frontend='cli', url=None):
     """
