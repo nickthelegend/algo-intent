@@ -16,10 +16,12 @@ class AIIntentParser:
         
         self.system_prompt = """Analyze Algorand-related requests and return JSON with:
 {
-  "intent": "send_algo|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft",
+  "intent": "send_algo|send_algo_multi|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft",
   "parameters": {
     "amount": float,
     "recipient": "address", 
+    "recipients": [{"address": "string", "amount": float}],
+    "total_amount": float,
     "name": "string",
     "supply": int,
     "description": "string",
@@ -33,6 +35,15 @@ IMPORTANT: For NFT creation, extract the actual name from various phrasings:
 Examples:
 User: "Hey, send 3 ALGO to K54ZTTHNDB..."
 {"intent": "send_algo", "parameters": {"amount": 3, "recipient": "K54ZTTHNDB..."}}
+
+User: "Send 5 ALGO to ADDRESS1 and 3 ALGO to ADDRESS2"
+{"intent": "send_algo_multi", "parameters": {"recipients": [{"address": "ADDRESS1", "amount": 5}, {"address": "ADDRESS2", "amount": 3}], "total_amount": 8}}
+
+User: "Send 10 ALGO to ADDRESS1, ADDRESS2, ADDRESS3"
+{"intent": "send_algo_multi", "parameters": {"recipients": [{"address": "ADDRESS1", "amount": 3.33}, {"address": "ADDRESS2", "amount": 3.33}, {"address": "ADDRESS3", "amount": 3.34}], "total_amount": 10}}
+
+User: "Send 2 ALGO each to ADDRESS1 and ADDRESS2"
+{"intent": "send_algo_multi", "parameters": {"recipients": [{"address": "ADDRESS1", "amount": 2}, {"address": "ADDRESS2", "amount": 2}], "total_amount": 4}}
 
 User: "Create a new wallet"
 {"intent": "create_wallet", "parameters": {}}
