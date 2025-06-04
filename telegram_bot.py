@@ -17,7 +17,8 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from functools import wraps
 from ai_intent import AIIntentParser
-from wallet import create_wallet, connect_wallet, disconnect_wallet, get_connected_wallet, sign_transaction
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from wallet import create_wallet, connect_wallet, sign_transaction
 from transaction_builder import build_and_send_transaction, create_nft, opt_in_to_asset, opt_out_of_asset
 from utils import get_algod_client, generate_unit_name
 import tempfile
@@ -292,21 +293,59 @@ async def start(update: Update, context: CallbackContext):
     """Welcome message for all users"""
     user = update.effective_user
     user_id = user.id
-    
     log_security_event(user_id, "BOT_STARTED", f"Username: {user.username}, Name: {user.first_name}")
     
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "Create Wallet",
+                switch_inline_query_current_chat="Create a wallet"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Connect Wallet",
+                switch_inline_query_current_chat="Connect wallet"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Send ALGO",
+                switch_inline_query_current_chat="Send [amount] ALGO to [address]"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Create NFT",
+                switch_inline_query_current_chat="Create NFT named [name] with description [desc]"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Opt-in to Asset",
+                switch_inline_query_current_chat="Opt-in to NFT [asset_id]"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Opt-out of Asset",
+                switch_inline_query_current_chat="Opt out of asset [asset_id]"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Check Balance",
+                switch_inline_query_current_chat="Check balance"
+            )
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         f"👋 Welcome {user.first_name} to Algo-Intent Bot!\n"
-        "🔒 This bot helps you manage Algorand wallets securely.\n\n"
-        "Available commands:\n"
-        "- 'Create a wallet'\n"
-        "- 'Send 5 ALGO to ADDRESS'\n"
-        "- 'Check balance'\n\n"
-        "📸 **For NFTs with images:**\n"
-        "• Send image WITH caption: 'Create NFT named Dragon with supply 10'\n"
-        "• Or send image first, then describe it"
+        "Choose an action below or type your request in plain English.\n"
         "⚠️ Security Notice: Never share your wallet passwords or mnemonic phrases with anyone!\n"
-        "🔐 All sensitive information is automatically deleted from chat for your security."
+        "🔐 All sensitive information is automatically deleted from chat for your security.",
+        reply_markup=reply_markup
     )
 
 async def handle_message(update: Update, context: CallbackContext):
@@ -676,76 +715,114 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
             await update.message.reply_text(f"❌ Incorrect password. {MAX_PASSWORD_ATTEMPTS - failed_attempts} attempts remaining.")
 
 async def handle_nft_creation(update: Update, context: CallbackContext, params: dict):
-    """Handle NFT creation with validation"""
+    """Handle NFT creation with video/image support and enhanced security"""
     user_id = update.effective_user.id
+    sessions = load_sessions()
     
+    # Validate session and parameters
     if not validate_session(user_id):
         await update.message.reply_text("❌ Please connect a wallet first!")
         return
-    
+
     if 'name' not in params or not params['name']:
         await update.message.reply_text("❌ Missing NFT name. Example: 'Create NFT named Dragon'")
         return
-    
-    # Validate NFT name
+
     nft_name = sanitize_input(params['name'])
-    if not nft_name or len(nft_name) < 1 or len(nft_name) > 50:
+    if not 1 <= len(nft_name) <= 50:
         await update.message.reply_text("❌ NFT name must be 1-50 characters long.")
         return
+
+    # Media handling
+    media_url = None
+    media_type = None
+    media_path = None
     
-    sessions = load_sessions()
-    user_session = sessions.get(str(user_id), {})
-    
-    # Add image handling
-    image_url = None
-    if 'nft_image' in context.user_data:
-        try:
-            image_path = context.user_data['nft_image']
-            image_url = upload_to_ipfs(image_path)
-            os.unlink(image_path)  # Cleanup temp file
-            del context.user_data['nft_image']
-        except Exception as e:
-            await update.message.reply_text(f"❌ Image processing error: {str(e)}")
-            return
-    
+    # Check for video first
+    if 'nft_video' in context.user_data:
+        media_type = 'video'
+        media_path = context.user_data['nft_video']
+    elif 'nft_image' in context.user_data:
+        media_type = 'image'
+        media_path = context.user_data['nft_image']
+        
     try:
+        # Process media if exists
+        if media_path:
+            try:
+                # Upload to IPFS
+                media_url = upload_to_ipfs(media_path)
+                
+                # Cleanup temp file
+                os.unlink(media_path)
+                del context.user_data[f'nft_{media_type}']
+                
+                # Log media upload
+                logger.info(f"User {user_id} uploaded {media_type} to IPFS: {media_url}")
+                log_security_event(user_id, "MEDIA_UPLOADED", f"Type: {media_type}, URL: {media_url}")
+                
+            except Exception as e:
+                await update.message.reply_text(f"❌ {media_type.capitalize()} processing error: {str(e)}")
+                logger.error(f"{media_type.capitalize()} handling failed for user {user_id}: {e}")
+                return
+
+        # Create metadata
+        metadata = {
+            "name": nft_name,
+            "description": sanitize_input(params.get('description', "")),
+            "media_type": media_type,
+            "media_url": media_url,
+            "creator": sessions[str(user_id)]["address"]
+        }
+
+        # Create NFT transaction
         algod_client = get_algod_client()
         result = create_nft(
             name=nft_name,
             unit_name=generate_unit_name(nft_name),
             total_supply=params.get('supply', 1),
-            description=sanitize_input(params.get('description', "")),
+            description=metadata["description"],
             algod_client=algod_client,
-            sender=user_session["address"],
+            sender=sessions[str(user_id)]["address"],
             frontend='telegram',
-            url=image_url  # Add image URL to NFT metadata
+            url=media_url,  # Store media URL directly
         )
-        
+
+        # Handle transaction approval flow
         if isinstance(result, dict) and result.get('status') == 'awaiting_approval':
-            context.user_data['pending_txn'] = result['unsigned_txn']
-            context.user_data['state'] = 'transaction_password'
-            context.user_data['transaction_type'] = 'nft'
+            context.user_data.update({
+                'pending_txn': result['unsigned_txn'],
+                'state': 'transaction_password',
+                'transaction_type': 'nft'
+            })
             
-            # Add image info to confirmation message
-            message_text = (
-                f"🎨 **NFT Creation Confirmation**\n\n"
-                f"📛 Name: **{nft_name}**\n"
-                f"📊 Supply: {params.get('supply', 1)}\n"
-                f"📝 Description: {params.get('description', 'None')}\n"
-            )
-            if image_url:
-                message_text += f"🌄 Image: {image_url}\n"
-            message_text += "💸 Fee: ~0.001 ALGO\n\n🔒 Enter your wallet password to create this NFT:"
+            # Build confirmation message
+            message = [
+                f"🎨 **NFT Creation Confirmation**",
+                f"📛 Name: {nft_name}",
+                f"📊 Supply: {params.get('supply', 1)}",
+                f"📝 Description: {metadata['description'] or 'None'}"
+            ]
             
-            log_security_event(user_id, "NFT_CREATION_PENDING", f"Name: {nft_name}")
+            if media_url:
+                message.append(f"🌄 Media: {media_url} ({media_type})")
+                
+            message.append("💸 Fee: ~0.001 ALGO\n\n🔒 Enter your wallet password:")
             
             await update.message.reply_text(
-                message_text,
+                "\n".join(message),
                 parse_mode="Markdown"
             )
+            
         else:
             log_security_event(user_id, "NFT_CREATED", f"Asset ID: {result}")
-            await update.message.reply_text(f"✅ NFT created! Asset ID: {result}")
+            await update.message.reply_text(
+                f"✅ **NFT Created Successfully!**\n"
+                f"🆔 Asset ID: `{result}`\n"
+                f"🔗 Media: {media_url or 'None'}",
+                parse_mode="Markdown"
+            )
+
     except Exception as e:
         logger.error(f"NFT creation failed for user {user_id}: {e}")
         log_security_event(user_id, "NFT_CREATION_FAILED", str(e))
@@ -833,7 +910,38 @@ async def handle_image_state(update: Update, context: CallbackContext):
         logger.error(f"Image NFT failed: {e}")
         await update.message.reply_text("❌ NFT creation failed")
         return ConversationHandler.END
-    
+
+async def handle_video(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    try:
+        video_file = await update.message.video.get_file()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+            await video_file.download_to_drive(temp_file.name)
+            context.user_data['nft_video'] = temp_file.name
+
+        caption = update.message.caption
+        if caption:
+            # Try to parse the caption as an NFT intent
+            sanitized_caption = sanitize_input(caption)
+            intent_parser = AIIntentParser()
+            parsed = intent_parser.parse(sanitized_caption)
+            if parsed and parsed.get('intent') == 'create_nft':
+                params = parsed.get('parameters', {})
+                params['video_path'] = context.user_data['nft_video']
+                await handle_nft_creation(update, context, params)
+                return ConversationHandler.END
+            # Fallback parsing...
+        else:
+            await update.message.reply_text(
+                "🎥 Video received! Now describe your NFT:\n"
+                "Example: 'Create NFT named Dance with this video'"
+            )
+            return IMAGE_HANDLING
+    except Exception as e:
+        logger.error(f"Video handling failed: {e}")
+        await update.message.reply_text("❌ Failed to process video")
+        return ConversationHandler.END
+
 async def handle_opt_in(update: Update, context: CallbackContext, params: dict):
     user_id = update.effective_user.id
     if not validate_session(user_id):
@@ -967,6 +1075,7 @@ def main():
         states={IMAGE_HANDLING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_image_state)]},
         fallbacks=[]
     ))
+    application.add_handler(MessageHandler(filters.VIDEO, handle_video))
     
     logger.info("🤖 Secure Bot started! Ready for public use with message security.")
     application.run_polling()
