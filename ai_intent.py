@@ -16,7 +16,7 @@ class AIIntentParser:
         
         self.system_prompt = """Analyze Algorand-related requests and return JSON with:
 {
-  "intent": "send_algo|send_algo_multi|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft",
+  "intent": "send_algo|send_algo_multi|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft|send_nft|send_nft_multi",
   "parameters": {
     "amount": float,
     "recipient": "address", 
@@ -66,11 +66,44 @@ User: "Make NFT with name 'Demon Slayer' and supply 2"
 User: "create an nft with this image named \"CoolArt\""
 {"intent": "create_nft", "parameters": {"name": "CoolArt"}}
 
+User: "create 10 nfts name cool style"
+{"intent": "create_nft", "parameters": {"name": "cool style", "supply": 10}}
+
+User: "create nft name cool style, 10 only"
+{"intent": "create_nft", "parameters": {"name": "cool style", "supply": 10}}
+
 User: "Opt-in to NFT 123456"
 {"intent": "opt_in", "parameters": {"asset_id": 123456}}
 
 User: "Opt out of asset 654321"
-{"intent": "opt_out", "parameters": {"asset_id": 654321}}"""
+{"intent": "opt_out", "parameters": {"asset_id": 654321}}
+
+User: "Opt-in to NFT 123456"
+{"intent": "opt_in", "parameters": {"asset_id": 123456}}
+
+User: "opt in for asset id 740574628"
+{"intent": "opt_in", "parameters": {"asset_id": 740574628}}
+
+User: "opt in for the asset 740574628"
+{"intent": "opt_in", "parameters": {"asset_id": 740574628}}
+
+User: "Opt out of asset 654321"
+{"intent": "opt_out", "parameters": {"asset_id": 654321}}
+
+User: "opt out for asset id 740574628"
+{"intent": "opt_out", "parameters": {"asset_id": 740574628}}
+
+User: "opt out for the asset 740574628"
+{"intent": "opt_out", "parameters": {"asset_id": 740574628}}
+
+User: "Send NFT 123 to ADDRESS"
+{"intent": "send_nft", "parameters": {"asset_id": 123, "recipient": "ADDRESS"}}
+
+User: "Send NFT 123 to ADDRESS"
+{"intent": "send_nft", "parameters": {"asset_id": 123, "recipient": "ADDRESS"}}
+
+User: "Transfer NFT 456 to ADDRESS1 and ADDRESS2"
+{"intent": "send_nft_multi", "parameters": {"asset_id": 456, "recipients": ["ADDRESS1", "ADDRESS2"]}}"""
 
     def parse(self, user_input: str) -> Optional[Dict]:
         try:
