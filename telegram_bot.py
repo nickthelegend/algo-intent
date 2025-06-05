@@ -17,12 +17,14 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from functools import wraps
 from ai_intent import AIIntentParser
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from wallet import create_wallet, connect_wallet, sign_transaction
-from transaction_builder import build_and_send_transaction, build_and_send_multi_transaction, create_nft, opt_in_to_asset, opt_out_of_asset
+from transaction_builder import build_and_send_transaction, build_and_send_multi_transaction, create_nft, send_nft, send_nft_multi, get_asset_id_from_txid, opt_in_to_asset, opt_out_of_asset
 from utils import get_algod_client, generate_unit_name
 import tempfile
 from ipfs_utils import upload_to_ipfs
+
+
 
 # Configuration
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -37,6 +39,8 @@ MAX_MESSAGE_LENGTH = 1000
 MAX_PASSWORD_ATTEMPTS = 3
 SESSION_TIMEOUT_HOURS = 24
 MAX_TRANSACTIONS_PER_HOUR = 10
+WALLET_CONNECTION = "WALLET_CONNECTION"
+CREATING_WALLET = "CREATING_WALLET"
 
 # Set up comprehensive logging
 logging.basicConfig(
@@ -199,56 +203,53 @@ def save_sessions(sessions):
         logger.error(f"Failed to save sessions: {e}")
 
 def parse_nft_command_fallback(text):
-    """Enhanced fallback NFT parser with better name extraction"""
+    """Improved fallback NFT parser to handle more natural language cases."""
     text = sanitize_input(text)
     if not text:
         return None
-    
-    # Remove quotes to normalize
-    normalized_text = re.sub(r'["\']', '', text)
-    
-    # Enhanced patterns to capture NFT names more accurately
-    patterns = [
-        # Pattern 1: "create/mint/make NFT named/called 'NAME'"
-        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+(?:this\s+)?image\s+)?(?:named|called)\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?",
-        
-        # Pattern 2: "create/mint/make NFT with name 'NAME'"
-        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+(?:with\s+(?:this\s+)?image\s+)?with\s+name\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?",
-        
-        # Pattern 3: Direct name pattern "create NFT NAME"
-        r"(?i)(create|mint|make)\s+(?:an?\s+)?nft\s+([a-zA-Z0-9\s]{1,50}?)(?:\s+with|\s+supply|\s*$)",
-        
-        # Pattern 4: "NFT named NAME" (general catch)
-        r"(?i)nft\s+(?:named|called)\s+['\"]?([a-zA-Z0-9\s]{1,50})['\"]?"
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, normalized_text)
-        if match:
-            # Get the name from the appropriate capture group
-            if len(match.groups()) >= 2:
-                name = match.group(2).strip()
-            else:
-                name = match.group(1).strip()
-            
-            if name and len(name) > 0:
-                # Extract supply if mentioned
-                supply_match = re.search(r'(?:supply|copies?|quantity)\s+(\d+)', text, re.IGNORECASE)
-                supply = int(supply_match.group(1)) if supply_match else 1
-                
-                # Extract description if mentioned
-                desc_match = re.search(r'(?:with\s+description|description)\s+([^,]+)', text, re.IGNORECASE)
-                description = desc_match.group(1).strip() if desc_match else ""
-                
-                return {
-                    'intent': 'create_nft',
-                    'parameters': {
-                        'name': name,
-                        'supply': supply,
-                        'description': description
-                    }
-                }
-    
+
+    # Pattern: "create 10 nfts name cool style"
+    pattern1 = r"(?i)create\s+(\d+)\s+nfts?\s+name\s+([a-zA-Z0-9\s]{1,50})"
+    match1 = re.search(pattern1, text)
+    if match1:
+        supply = int(match1.group(1))
+        name = match1.group(2).strip()
+        return {
+            'intent': 'create_nft',
+            'parameters': {
+                'name': name,
+                'supply': supply
+            }
+        }
+
+    # Pattern: "create nft name cool style, 10 only"
+    pattern2 = r"(?i)create\s+nft\s+name\s+([a-zA-Z0-9\s]{1,50})[, ]+(\d+)\s*(?:only)?"
+    match2 = re.search(pattern2, text)
+    if match2:
+        name = match2.group(1).strip()
+        supply = int(match2.group(2))
+        return {
+            'intent': 'create_nft',
+            'parameters': {
+                'name': name,
+                'supply': supply
+            }
+        }
+
+    # Existing patterns for "create nft named X with supply Y"
+    pattern3 = r"(?i)create\s+nft\s+(?:named|called)?\s*([a-zA-Z0-9\s]{1,50})(?:\s+with\s+supply\s+(\d+))?"
+    match3 = re.search(pattern3, text)
+    if match3:
+        name = match3.group(1).strip()
+        supply = int(match3.group(2)) if match3.group(2) else 1
+        return {
+            'intent': 'create_nft',
+            'parameters': {
+                'name': name,
+                'supply': supply
+            }
+        }
+
     return None
 
 
@@ -289,6 +290,48 @@ def parse_send_command_fallback(text):
         }
     return None
 
+def parse_opt_command_fallback(text):
+    """Enhanced fallback parser for opt-in/opt-out commands"""
+    text = sanitize_input(text)
+    if not text:
+        return None
+    
+    # Patterns for opt-in
+    opt_in_patterns = [
+        r"(?i)opt\s*in\s+(?:to\s+|for\s+|)(?:nft\s+|asset\s+|asset\s+id\s+|the\s+asset\s+|)(\d+)",
+        r"(?i)opt\s*in\s+(\d+)",
+    ]
+    
+    # Patterns for opt-out  
+    opt_out_patterns = [
+        r"(?i)opt\s*out\s+(?:of\s+|from\s+|for\s+|)(?:nft\s+|asset\s+|asset\s+id\s+|the\s+asset\s+|)(\d+)",
+        r"(?i)opt\s*out\s+(\d+)",
+    ]
+    
+    # Check opt-in patterns
+    for pattern in opt_in_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return {
+                'intent': 'opt_in',
+                'parameters': {
+                    'asset_id': int(match.group(1))
+                }
+            }
+    
+    # Check opt-out patterns
+    for pattern in opt_out_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return {
+                'intent': 'opt_out',
+                'parameters': {
+                    'asset_id': int(match.group(1))
+                }
+            }
+    
+    return None
+
 async def start(update: Update, context: CallbackContext):
     """Welcome message for all users"""
     user = update.effective_user
@@ -322,6 +365,12 @@ async def start(update: Update, context: CallbackContext):
         ],
         [
             InlineKeyboardButton(
+                "Send NFT",
+                switch_inline_query_current_chat="Send NFT [assetID] to [address]"
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 "Opt-in to Asset",
                 switch_inline_query_current_chat="Opt-in to NFT [asset_id]"
             )
@@ -343,6 +392,7 @@ async def start(update: Update, context: CallbackContext):
     await update.message.reply_text(
         f"👋 Welcome {user.first_name} to Algo-Intent Bot!\n"
         "Choose an action below or type your request in plain English.\n"
+        "You can cancel any command at any time with /cancel\n"
         "⚠️ Security Notice: Never share your wallet passwords or mnemonic phrases with anyone!\n"
         "🔐 All sensitive information is automatically deleted from chat for your security.",
         reply_markup=reply_markup
@@ -423,6 +473,10 @@ async def handle_message(update: Update, context: CallbackContext):
             await handle_multi_send_transaction(update, context, params)
         elif intent == 'create_nft':
             await handle_nft_creation(update, context, params)
+        elif intent == 'send_nft':                              # ✅ ADD THIS
+            await handle_send_nft(update, context, params)
+        elif intent == 'send_nft_multi':
+            await handle_send_nft_multi(update, context, params)   
         elif intent == 'opt_in':
             await handle_opt_in(update, context, params)
         elif intent == 'opt_out':
@@ -735,45 +789,90 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
     await delete_message_safely(update, context)
 
     try:
+        # Extract important data BEFORE clearing context
         pending_txn = context.user_data.get('pending_txn')
-        pending_txns = context.user_data.get('pending_txns')  # NEW: Multi-transaction support
+        pending_txns = context.user_data.get('pending_txns')
         transaction_type = context.user_data.get('transaction_type', 'send')
+        asset_id = context.user_data.get('asset_id')
+        recipients = context.user_data.get('recipients', [])
+        
+        # Extract asset_id from transaction if not in context
+        if not asset_id and pending_txn and hasattr(pending_txn, 'index'):
+            asset_id = pending_txn.index
 
-        if not pending_txn and not pending_txns:  # UPDATED: Check both
+        if not pending_txn and not pending_txns:
             await update.message.reply_text("❌ No pending transaction found.")
             context.user_data.clear()
             return
 
-        algod_client = get_algod_client()
+        # Clear context AFTER extracting needed data
+        context.user_data.clear()
 
-        # Add this block for opt-in/out handling
+        algod_client = get_algod_client()
+        sessions = load_sessions()
+        user_address = sessions[str(user_id)]["address"]
+
+        # Handle different transaction types
         if transaction_type == 'opt_in':
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
             txid = algod_client.send_transaction(signed_txn)
-            log_security_event(user_id, "ASSET_OPT_IN", f"TxID: {txid}")
+            log_security_event(user_id, "ASSET_OPT_IN", f"Asset: {asset_id}, TxID: {txid}")
             await update.message.reply_text(f"✅ Opt-in successful! TxID: `{txid}`", parse_mode="Markdown")
             
         elif transaction_type == 'opt_out':
+            # PROPER OPT-OUT VALIDATION WITH RETRY LOGIC
+            asset_holding = None
+            
+            # Retry up to 3 times with 2-second delay (for indexer sync after recent opt-in)
+            for attempt in range(3):
+                try:
+                    account_info = algod_client.account_info(user_address)
+                    asset_holding = next(
+                        (asset for asset in account_info.get('assets', []) 
+                         if asset['asset-id'] == asset_id), 
+                        None
+                    )
+                    if asset_holding:
+                        break
+                    if attempt < 2:  # Don't sleep on last attempt
+                        time.sleep(2)
+                except Exception as e:
+                    logger.error(f"Account info check failed for user {user_id}, attempt {attempt + 1}: {e}")
+                    if attempt < 2:
+                        time.sleep(2)
+
+            if not asset_holding:
+                await update.message.reply_text(f"❌ You are not opted into asset {asset_id}")
+                return
+
+            if asset_holding['amount'] > 0:
+                await update.message.reply_text(
+                    f"❌ Cannot opt-out: You hold {asset_holding['amount']} units of asset {asset_id}.\n"
+                    f"Transfer them first before opting out."
+                )
+                return
+
+            # Proceed with opt-out
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
             txid = algod_client.send_transaction(signed_txn)
-            log_security_event(user_id, "ASSET_OPT_OUT", f"TxID: {txid}")
-            await update.message.reply_text(f"✅ Opt-out successful! TxID: `{txid}`", parse_mode="Markdown")
+            log_security_event(user_id, "ASSET_OPT_OUT", f"Asset: {asset_id}, TxID: {txid}")
+            await update.message.reply_text(
+                f"✅ Opt-out successful!\n"
+                f"🆔 Asset ID: {asset_id}\n"
+                f"📄 TxID: `{txid}`",
+                parse_mode="Markdown"
+            )
             
-        elif transaction_type == 'multi_send':  # NEW: Multi-recipient handling
-            # Handle multi-recipient transactions
-            recipients = context.user_data.get('recipients', [])
-            
-            # Sign all transactions in the group
+        elif transaction_type == 'multi_send':
+            # Handle multi-recipient ALGO transactions
             signed_txns = []
             for txn in pending_txns:
                 signed_txn = sign_transaction(txn, password=password, frontend='telegram')
                 signed_txns.append(signed_txn)
             
-            # Send the atomic transfer group
             txid = algod_client.send_transactions(signed_txns)
-            
             total_amount = sum(r['amount'] for r in recipients)
-            log_security_event(user_id, "MULTI_SEND_COMPLETED", f"Recipients: {len(recipients)}, Total: {total_amount} ALGO, TxID: {txid}")
+            log_security_event(user_id, "MULTI_SEND_COMPLETED", f"Recipients: {len(recipients)}, Total: {total_amount} ALGO")
             
             await update.message.reply_text(
                 f"✅ **Multi-Recipient Transfer Successful!**\n"
@@ -782,46 +881,111 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
                 f"📄 **Group TxID:** `{txid}`",
                 parse_mode="Markdown"
             )
-            
-        elif transaction_type == 'nft':
-            # Existing NFT handling code
+
+        elif transaction_type == 'nft_transfer':
+            # Handle single NFT transfer
+            # Verify sender ownership
+            account_info = algod_client.account_info(user_address)
+            owns_nft = any(
+                a['asset-id'] == asset_id and a['amount'] > 0
+                for a in account_info.get('assets', [])
+            )
+            if not owns_nft:
+                await update.message.reply_text(f"❌ You don't own NFT {asset_id}")
+                return
+
+            # Verify recipient opted-in
+            recipient = pending_txn.receiver
+            try:
+                recipient_info = algod_client.account_info(recipient)
+                recipient_opted_in = any(a['asset-id'] == asset_id for a in recipient_info.get('assets', []))
+            except Exception:
+                recipient_opted_in = False
+
+            if not recipient_opted_in:
+                await update.message.reply_text(
+                    f"❌ Recipient must opt-in first!\n"
+                    f"Ask them to use: 'Opt-in to asset {asset_id}'"
+                )
+                return
+
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
             txid = algod_client.send_transaction(signed_txn)
-            from algosdk.transaction import wait_for_confirmation
-            confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
-            asset_id = confirmed_txn["asset-index"]
-            log_security_event(user_id, "NFT_CREATED", f"Asset ID: {asset_id}, TxID: {txid}")
+            log_security_event(user_id, "NFT_TRANSFERRED", f"Asset ID: {asset_id}, TxID: {txid}")
+            await update.message.reply_text(
+                f"✅ **NFT Transferred!**\n"
+                f"🆔 Asset ID: `{asset_id}`\n"
+                f"👤 To: `{recipient[:8]}...`\n"
+                f"📄 TxID: `{txid}`",
+                parse_mode="Markdown"
+            )
+
+        elif transaction_type == 'nft_multi_transfer':
+            # Handle multi-recipient NFT transfer
+            signed_txns = []
+            for txn in pending_txns:
+                signed_txn = sign_transaction(txn, password=password, frontend='telegram')
+                signed_txns.append(signed_txn)
+            
+            txid = algod_client.send_transactions(signed_txns)
+            log_security_event(user_id, "NFT_MULTI_TRANSFER", f"Asset ID: {asset_id}, Recipients: {len(recipients)}")
+            await update.message.reply_text(
+                f"✅ **Multi-NFT Transfer Complete!**\n"
+                f"🆔 Asset ID: `{asset_id}`\n"
+                f"👥 Recipients: {len(recipients)}\n"
+                f"📄 Group TxID: `{txid}`",
+                parse_mode="Markdown"
+            )
+            
+        elif transaction_type == 'nft':
+            signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
+            txid = algod_client.send_transaction(signed_txn)
+            asset_id = get_asset_id_from_txid(algod_client, txid)
+            log_security_event(user_id, "NFT_CREATED", f"TxID: {txid}")
             await update.message.reply_text(
                 f"✅ **NFT Created Successfully!**\n"
-                f"🎨 Asset ID: `{asset_id}`\n"
+                f"🆔 Asset ID: `{asset_id}`\n"
                 f"📄 Transaction ID: `{txid}`",
                 parse_mode="Markdown"
             )
-        else:  # Default case for regular transactions
+            
+        else:  # Default case for regular ALGO transactions
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
             txid = algod_client.send_transaction(signed_txn)
             log_security_event(user_id, "TRANSACTION_SIGNED", f"TxID: {txid}")
             await update.message.reply_text(
                 f"✅ **Transaction Successful!**\n"
                 f"📄 Transaction ID: `{txid}`",
+                f"⏳ Asset ID will be available once confirmed.",
                 parse_mode="Markdown"
             )
 
-        context.user_data.clear()
-
     except Exception as e:
-        # Existing error handling code
-        failed_attempts = context.user_data.get('failed_attempts', 0) + 1
-        context.user_data['failed_attempts'] = failed_attempts
-        logger.error(f"Transaction signing failed for user {user_id}: {e}")
-        log_security_event(user_id, "TRANSACTION_SIGN_FAILED", f"Attempt {failed_attempts}")
-
-        if failed_attempts >= MAX_PASSWORD_ATTEMPTS:
-            context.user_data.clear()
-            await update.message.reply_text("❌ Too many failed password attempts. Transaction cancelled.")
+        error_msg = str(e)
+        logger.error(f"Transaction failed for user {user_id}: {error_msg}")
+        
+        # Handle specific Algorand errors
+        if "already in ledger" in error_msg:
+            await update.message.reply_text("✅ Transaction already completed successfully.")
+        elif "must optin" in error_msg.lower():
+            await update.message.reply_text(
+                f"❌ Recipient not opted in to asset {asset_id}!\n"
+                f"Ask them to use: 'Opt-in to asset {asset_id}'"
+            )
+        elif "cannot close asset ID in allocating account" in error_msg:
+            await update.message.reply_text(f"❌ Cannot opt-out of asset {asset_id}: You may still have a balance.")
+        elif "asset does not exist" in error_msg:
+            await update.message.reply_text(f"❌ Asset {asset_id} does not exist.")
         else:
-            await update.message.reply_text(f"❌ Incorrect password. {MAX_PASSWORD_ATTEMPTS - failed_attempts} attempts remaining.")
-
+            failed_attempts = context.user_data.get('failed_attempts', 0) + 1
+            if failed_attempts >= MAX_PASSWORD_ATTEMPTS:
+                context.user_data.clear()
+                await update.message.reply_text("❌ Too many failed attempts. Session reset.")
+            else:
+                context.user_data['failed_attempts'] = failed_attempts
+                remaining = MAX_PASSWORD_ATTEMPTS - failed_attempts
+                await update.message.reply_text(f"❌ Incorrect password. {remaining} attempts remaining.")
+    
 async def handle_nft_creation(update: Update, context: CallbackContext, params: dict):
     """Handle NFT creation with video/image support and enhanced security"""
     user_id = update.effective_user.id
@@ -893,7 +1057,7 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
             algod_client=algod_client,
             sender=sessions[str(user_id)]["address"],
             frontend='telegram',
-            url=media_url,  # Store media URL directly
+            url=media_url
         )
 
         # Handle transaction approval flow
@@ -923,11 +1087,18 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
             )
             
         else:
-            log_security_event(user_id, "NFT_CREATED", f"Asset ID: {result}")
+            # Direct success case with asset ID from transaction builder
+            log_security_event(user_id, "NFT_CREATED", f"Asset ID: {result.get('asset_id')}")
+            response_message = [
+                f"✅ **NFT Created Successfully!**",
+                f"🆔 Asset ID: `{result.get('asset_id')}`",
+                f"📄 Transaction ID: `{result.get('txid')}`"
+            ]
+            if media_url:
+                response_message.append(f"🔗 Media: {media_url}")
+                
             await update.message.reply_text(
-                f"✅ **NFT Created Successfully!**\n"
-                f"🆔 Asset ID: `{result}`\n"
-                f"🔗 Media: {media_url or 'None'}",
+                "\n".join(response_message),
                 parse_mode="Markdown"
             )
 
@@ -935,7 +1106,7 @@ async def handle_nft_creation(update: Update, context: CallbackContext, params: 
         logger.error(f"NFT creation failed for user {user_id}: {e}")
         log_security_event(user_id, "NFT_CREATION_FAILED", str(e))
         await update.message.reply_text("❌ Failed to create NFT. Please try again.")
-        
+
 async def handle_photo(update: Update, context: CallbackContext):
     """Handle image uploads for NFT creation with caption support"""
     user_id = update.effective_user.id
@@ -1049,6 +1220,168 @@ async def handle_video(update: Update, context: CallbackContext):
         logger.error(f"Video handling failed: {e}")
         await update.message.reply_text("❌ Failed to process video")
         return ConversationHandler.END
+    
+async def handle_send_nft(update: Update, context: CallbackContext, params: dict):
+    user_id = update.effective_user.id
+    sessions = load_sessions()
+    
+    # Validate session
+    if str(user_id) not in sessions:
+        await update.message.reply_text("❌ Connect wallet first!")
+        return
+        
+    # Validate parameters
+    if 'asset_id' not in params or 'recipient' not in params:
+        await update.message.reply_text("❌ Missing NFT ID or recipient")
+        return
+        
+    try:
+        asset_id = int(params['asset_id'])
+        recipient = params['recipient']
+        
+        if not validate_algorand_address(recipient):
+            await update.message.reply_text("❌ Invalid recipient address")
+            return
+            
+        algod_client = get_algod_client()
+        result = send_nft(
+            sender=sessions[str(user_id)]["address"],
+            asset_id=asset_id,
+            recipient=recipient,
+            algod_client=algod_client,
+            frontend='telegram'
+        )
+        
+        if result.get('status') == 'awaiting_approval':
+            context.user_data.update({
+                'pending_txn': result['unsigned_txn'],
+                'state': 'transaction_password',
+                'transaction_type': 'nft_transfer'
+            })
+            
+            await update.message.reply_text(
+                f"📦 **NFT Transfer Confirmation**\n\n"
+                f"🆔 Asset ID: {asset_id}\n"
+                f"👤 Recipient: {recipient}\n"
+                f"💸 Fee: ~0.001 ALGO\n\n"
+                f"🔒 Enter your wallet password:",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(f"✅ NFT transferred! TXID: {result['txid']}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def handle_send_nft_multi(update: Update, context: CallbackContext, params: dict):
+    user_id = update.effective_user.id
+    sessions = load_sessions()
+    
+    if str(user_id) not in sessions:
+        await update.message.reply_text("❌ Connect wallet first!")
+        return
+        
+    try:
+        asset_id = int(params['asset_id'])
+        recipients = params['recipients']
+        
+        # Validate recipients
+        valid_recipients = []
+        for addr in recipients:
+            if validate_algorand_address(addr):
+                valid_recipients.append(addr)
+            else:
+                await update.message.reply_text(f"❌ Skipping invalid address: {addr}")
+                
+        if not valid_recipients:
+            await update.message.reply_text("❌ No valid recipients")
+            return
+            
+        algod_client = get_algod_client()
+        result = send_nft_multi(
+            sender=sessions[str(user_id)]["address"],
+            asset_id=asset_id,
+            recipients=valid_recipients,
+            algod_client=algod_client,
+            frontend='telegram'
+        )
+        
+        if result.get('status') == 'awaiting_approval':
+            context.user_data.update({
+                'pending_txns': result['unsigned_txns'],
+                'state': 'transaction_password',
+                'transaction_type': 'nft_multi_transfer'
+            })
+            
+            message = [
+                f"📦 **Multi-NFT Transfer Confirmation**",
+                f"🆔 Asset ID: {asset_id}",
+                f"👥 Recipients: {len(valid_recipients)}",
+                f"💸 Total Fee: ~{len(valid_recipients)*0.001:.3f} ALGO\n"
+            ]
+            
+            for i, addr in enumerate(valid_recipients[:3]):  # Show first 3
+                message.append(f"`{addr[:8]}...{addr[-8:]}`")
+                
+            if len(valid_recipients) > 3:
+                message.append(f"...and {len(valid_recipients)-3} more")
+                
+            message.append("\n🔒 Enter your wallet password:")
+            
+            await update.message.reply_text("\n".join(message), parse_mode="Markdown")
+            
+        else:
+            await update.message.reply_text(f"✅ NFTs transferred! TXID: {result['txid']}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+        
+async def debug_nft_transfer(update: Update, context: CallbackContext, asset_id: int, recipient: str):
+    """Debug NFT transfer issues"""
+    user_id = update.effective_user.id
+    sessions = load_sessions()
+    user_address = sessions[str(user_id)]["address"]
+    
+    try:
+        algod_client = get_algod_client()
+        
+        # Check sender account
+        sender_info = algod_client.account_info(user_address)
+        sender_owns = False
+        for asset in sender_info.get('assets', []):
+            if asset['asset-id'] == asset_id:
+                sender_owns = asset['amount'] > 0
+                break
+        
+        # Check recipient account
+        try:
+            recipient_info = algod_client.account_info(recipient)
+            recipient_opted_in = any(asset['asset-id'] == asset_id for asset in recipient_info.get('assets', []))
+        except:
+            recipient_opted_in = False
+        
+        # Check asset info
+        try:
+            asset_info = algod_client.asset_info(asset_id)
+            asset_exists = True
+        except:
+            asset_exists = False
+        
+        debug_msg = [
+            f"🔍 **NFT Transfer Debug**",
+            f"🆔 Asset ID: {asset_id}",
+            f"📤 You own NFT: {'✅' if sender_owns else '❌'}",
+            f"📥 Recipient opted in: {'✅' if recipient_opted_in else '❌'}",
+            f"🎨 Asset exists: {'✅' if asset_exists else '❌'}"
+        ]
+        
+        if not recipient_opted_in:
+            debug_msg.append(f"\n💡 **Solution:** Ask recipient to opt-in first:\n`Opt-in to asset {asset_id}`")
+        
+        await update.message.reply_text("\n".join(debug_msg), parse_mode="Markdown")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Debug failed: {str(e)}")
 
 async def handle_opt_in(update: Update, context: CallbackContext, params: dict):
     user_id = update.effective_user.id
@@ -1162,6 +1495,24 @@ async def handle_disconnect(update: Update, context: CallbackContext):
     
     context.user_data.clear()
     await update.message.reply_text("✅ Wallet disconnected securely")
+    
+async def cancel(update: Update, context: CallbackContext):
+    """Cancel current conversation"""
+    exit_keyboard = ReplyKeyboardMarkup(
+    [["❌ Cancel", "🏠 Main Menu"]], 
+    resize_keyboard=True, 
+    one_time_keyboard=True
+)
+    await update.message.reply_text(
+        "Please enter your mnemonic:",
+        reply_markup=exit_keyboard
+    )
+    await update.message.reply_text(
+        "❌ Operation cancelled. Type /start to see available commands.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 def main():
     """Start the bot with security logging"""
@@ -1174,19 +1525,48 @@ def main():
     
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Add handlers
+    # Add cancel handler first (highest priority)
+    application.add_handler(CommandHandler("cancel", cancel))
+    
+    # Add start handler
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Add media handlers
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
-        states={IMAGE_HANDLING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_image_state)]},
-        fallbacks=[]
-    ))
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
+    
+    # Conversation handler with proper fallbacks
+    conversation_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
+        states={
+            IMAGE_HANDLING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_image_state)],
+            WALLET_CONNECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mnemonic_input)],
+            CREATING_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_wallet_creation_password)],
+            'transaction_password': [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_state)]
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),          # /cancel exits conversation
+            CommandHandler("start", start),            # /start exits conversation  
+            MessageHandler(filters.COMMAND, cancel)   # ANY command exits conversation
+        ],
+        allow_reentry=True
+    )
+    
+    application.add_handler(conversation_handler)
     
     logger.info("🤖 Secure Bot started! Ready for public use with message security.")
     application.run_polling()
+
+# Add this cancel function before main()
+async def cancel(update: Update, context: CallbackContext):
+    """Cancel current conversation and return to main menu"""
+    await update.message.reply_text(
+        "❌ Operation cancelled.\n"
+        "Type /start to see available commands.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 if __name__ == "__main__":
     main()
