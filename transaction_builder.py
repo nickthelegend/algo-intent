@@ -149,43 +149,123 @@ def create_nft(name, unit_name, total_supply, description, algod_client, sender,
         
         # Build unsigned transaction
         txn = AssetConfigTxn(
-                sender=sender,
-                sp=params,
-                total=total_supply,
-                default_frozen=False,
-                unit_name=unit_name,
-                asset_name=name,
-                manager=sender,
-                reserve=sender,
-                freeze=sender,
-                clawback=sender,
-                url=url or "",  # Add image URL here
-                decimals=0,
-                note=description.encode() if description else None
-            )
+            sender=sender,
+            sp=params,
+            total=total_supply,
+            default_frozen=False,
+            unit_name=unit_name[:8],  # Max 8 characters
+            asset_name=name[:32],     # Max 32 characters
+            manager=sender,
+            reserve=sender,
+            freeze=sender,
+            clawback=sender,
+            url=url or "",
+            decimals=0,
+            note=description.encode() if description else None
+        )
                 
-        # Sign transaction with appropriate frontend
-        sign_result = sign_transaction(txn, password=password, frontend=frontend)
-        
-        # If we need approval (Telegram case), return details for user confirmation
-        if isinstance(sign_result, dict) and sign_result.get("needs_approval"):
+        if frontend == 'telegram':
             return {
                 'status': 'awaiting_approval',
-                'txn_details': sign_result['txn_details'],
-                'unsigned_txn': sign_result['unsigned_txn']
+                'unsigned_txn': txn,
             }
         
-        # Send transaction
-        txid = algod_client.send_transaction(sign_result)
+        # For CLI: sign and send immediately
+        signed_txn = sign_transaction(txn, password=password, frontend=frontend)
+        txid = algod_client.send_transaction(signed_txn)
         
-        # Wait for confirmation
+        # Wait for confirmation and get asset ID
         confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
         asset_id = confirmed_txn["asset-index"]
         
-        return asset_id
+        return {
+            'status': 'success',
+            'asset_id': asset_id,
+            'txid': txid
+        }
         
     except Exception as e:
         raise NFTCreationError(f"❌ NFT creation failed: {e}")
+    
+def send_nft(sender, asset_id, recipient, algod_client, password=None, frontend='cli'):
+    """Transfer NFT to single recipient"""
+    try:
+        params = algod_client.suggested_params()
+        txn = AssetTransferTxn(
+            sender=sender,
+            sp=params,
+            receiver=recipient,
+            amt=1,
+            index=asset_id
+        )
+        
+        if frontend == 'telegram':
+            return {
+                'status': 'awaiting_approval',
+                'unsigned_txn': txn,
+                'txn_details': {
+                    'type': 'nft_transfer',
+                    'asset_id': asset_id,
+                    'recipient': recipient
+                }
+            }
+            
+        signed_txn = sign_transaction(txn, password=password, frontend=frontend)
+        txid = algod_client.send_transaction(signed_txn)
+        return {'status': 'success', 'txid': txid}
+        
+    except Exception as e:
+        raise TransactionError(f"NFT transfer failed: {str(e)}")
+
+def send_nft_multi(sender, asset_id, recipients, algod_client, password=None, frontend='cli'):
+    """Atomic transfer to multiple recipients"""
+    try:
+        params = algod_client.suggested_params()
+        txns = []
+        
+        for recipient in recipients:
+            txns.append(
+                AssetTransferTxn(
+                    sender=sender,
+                    sp=params,
+                    receiver=recipient,
+                    amt=1,
+                    index=asset_id
+                )
+            )
+            
+        # Group transactions
+        grouped = assign_group_id(txns)
+        
+        if frontend == 'telegram':
+            return {
+                'status': 'awaiting_approval',
+                'unsigned_txns': grouped,
+                'txn_details': {
+                    'type': 'nft_multi_transfer',
+                    'asset_id': asset_id,
+                    'recipients': recipients
+                }
+            }
+            
+        signed_group = []
+        for txn in grouped:
+            signed = sign_transaction(txn, password=password, frontend=frontend)
+            signed_group.append(signed)
+            
+        txid = algod_client.send_transactions(signed_group)
+        return {'status': 'success', 'txid': txid}
+        
+    except Exception as e:
+        raise TransactionError(f"Multi-NFT transfer failed: {str(e)}")
+    
+def get_asset_id_from_txid(algod_client, txid):
+    """Get asset ID from transaction ID (for NFT creation)"""
+    try:
+        confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
+        return confirmed_txn['asset-index']
+    except Exception as e:
+        raise Exception(f"Asset ID lookup failed: {str(e)}")
     
 def opt_in_to_asset(sender, asset_id, algod_client, password=None, frontend='cli'):
     """
