@@ -114,10 +114,10 @@ algo-intent-bot/
 
 ## 🌐 Supported Networks
 
-| Network | Status  | Explorer Link                     |
-|---------|---------|-----------------------------------|
-| Testnet | ✅ Live | https://testnet.algoexplorer.io   |
-| Mainnet | ⚠️ Beta | https://algoexplorer.io           |
+| Network | Status  | Explorer Link                          |
+|---------|---------|----------------------------------------|
+| Testnet | ✅ Live | https://testnet.explorer.perawallet.app|
+| Mainnet | ⚠️ Beta | https://explorer.perawallet.app/       |
 
 ---
 
