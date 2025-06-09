@@ -117,7 +117,7 @@ algo-intent-bot/
 | Network | Status  | Explorer Link                     |
 |---------|---------|-----------------------------------|
 | Testnet | ✅ Live | https://testnet.algoexplorer.io   |
-| Mainnet | ✅ Live | https://algoexplorer.io           |
+| Mainnet | ⚠️ Beta | https://algoexplorer.io           |
 
 ---
 
@@ -147,11 +147,11 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ## 🏁 Quick Demo
 
-![Demo Screenshot](demo/demo1.png)
+<img width="946" alt="Screenshot 2025-06-09 at 6 42 48 PM" src="https://github.com/user-attachments/assets/3e352860-6e88-4a6a-a656-7db3a6fadd4c" />
 
 ---
 
 Thank you for using **Algo-Intent**!  
 Happy building on Algorand 🚀
 
-```
+
