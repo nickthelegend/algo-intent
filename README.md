@@ -124,7 +124,6 @@ algo-intent-bot/
 ## 🤝 Contributing
 
 Pull requests, issues, and feature suggestions are welcome!  
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
