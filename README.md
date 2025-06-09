@@ -99,11 +99,10 @@ algo-intent/
 ## 🛡️ Troubleshooting & Tips
 
 - **Transaction says failed but went through?**  
-  Always check the provided TxID in [Pera Explorer](https://testnet.explorer.perawallet.app) or [AlgoExplorer](https://algoexplorer.io/) for final status.
+  Always check the provided TxID in [Pera Explorer](https://testnet.explorer.perawallet.app) for final status.
 - **NFT/ALGO not received?**  
   - Ensure the recipient has opted-in (for NFTs).
   - Check your wallet balance and transaction history.
-  - Use `/check_tx <txid>` to check transaction status.
 - **Bot doesn't understand my command?**  
   Try rephrasing or use the example commands above.
 - **Lost wallet access?**  
