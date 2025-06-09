@@ -77,7 +77,7 @@ to mint NFTs with media!
 ## 🗂️ Project Structure
 
 ```
-algo-intent-bot/
+algo-intent/
 ├── telegram_bot.py        # Main Telegram bot logic
 ├── ai_intent.py           # AI-powered intent parser
 ├── wallet.py              # Wallet management and encryption
