@@ -85,6 +85,7 @@ algo-intent-bot/
 ├── ipfs_utils.py          # IPFS integration for NFT media
 ├── utils.py               # Helper utilities
 └── requirements.txt
+```
 
 ## 🔒 Security
 
