@@ -3,15 +3,14 @@ import sys
 import json
 import logging
 from intent_parser import parse_intent, parse_nft_intent
-from transaction_builder import build_and_send_transaction, TransactionError, create_nft, NFTCreationError
+from transaction_builder import build_and_send_transaction, create_nft
 from utils import get_algod_client, generate_unit_name
 from wallet import (
     create_wallet, 
     connect_wallet, 
     disconnect_wallet,
     get_connected_wallet, 
-    list_wallets,
-    format_wallet_display
+    list_wallets
 )
 
 def setup_logging(debug=False):
