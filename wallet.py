@@ -1,8 +1,6 @@
 import os
 import json
-import algosdk
 from algosdk import account, mnemonic
-from pathlib import Path
 import base64
 import getpass
 from cryptography.fernet import Fernet
