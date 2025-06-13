@@ -843,7 +843,6 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
             txid = algod_client.send_transaction(signed_txn)
             
             # Try to get asset ID (this might fail but transaction succeeded)
-            from transaction_builder import confirm_and_get_asset_id
             asset_id = confirm_and_get_asset_id(algod_client, txid)
             
             log_security_event(user_id, "NFT_CREATED", f"TxID: {txid}, Asset ID: {asset_id}")
