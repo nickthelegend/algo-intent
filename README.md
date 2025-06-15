@@ -153,3 +153,4 @@ Thank you for using **Algo-Intent**!
 Happy building on Algorand 🚀
 
 
+Build For Hack Series 2025
