@@ -1,3 +1,4 @@
+
 from algosdk.transaction import PaymentTxn, AssetConfigTxn, AssetTransferTxn, wait_for_confirmation, assign_group_id
 from utils import validate_address, check_account_balance
 from wallet import sign_transaction
@@ -258,6 +259,15 @@ def send_nft_multi(sender, asset_id, recipients, algod_client, password=None, fr
     except Exception as e:
         raise TransactionError(f"Multi-NFT transfer failed: {str(e)}")
     
+
+def confirm_and_get_asset_id(algod_client, txid):
+    """Get asset ID from transaction ID (for NFT creation)"""
+    try:
+        confirmed_txn = wait_for_confirmation(algod_client, txid, 4)
+        return confirmed_txn['asset-index']
+    except Exception as e:
+        raise Exception(f"Asset ID lookup failed: {str(e)}")
+    
 def opt_in_to_asset(sender, asset_id, algod_client, password=None, frontend='cli'):
     """
     Opt-in to an Algorand ASA/NFT.
@@ -301,4 +311,4 @@ def opt_out_of_asset(sender, asset_id, algod_client, password=None, frontend='cl
             'txn_details': sign_result['txn_details']
         }
     txid = algod_client.send_transaction(sign_result)
-    return {'status': 'success', 'txid': txid}
+    return {'status': 'success', 'txid': txid}
