@@ -16,10 +16,10 @@ from telegram.ext import (
 from ai_intent import AIIntentParser
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from wallet import create_wallet, connect_wallet, sign_transaction
-from transaction_builder import build_and_send_transaction, build_and_send_multi_transaction, create_nft, send_nft, send_nft_multi, opt_in_to_asset, opt_out_of_asset
+from transaction_builder import build_and_send_transaction, build_and_send_multi_transaction, create_nft, send_nft, send_nft_multi, opt_in_to_asset, opt_out_of_asset, confirm_and_get_asset_id
 from utils import get_algod_client, generate_unit_name
 import tempfile
-from ipfs_utils import upload_to_ipfs
+from ipfs_utils import upload_to_ipfs
 
 
 
