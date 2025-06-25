@@ -145,7 +145,7 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ## 🏁 Quick Demo
 
-<img width="946" alt="Screenshot 2025-06-09 at 6 42 48 PM" src="https://github.com/user-attachments/assets/3e352860-6e88-4a6a-a656-7db3a6fadd4c" />
+Youtube Link: https://youtu.be/gwnjztTM3wI
 
 ---
 
