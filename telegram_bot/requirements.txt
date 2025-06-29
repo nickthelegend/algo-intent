@@ -1,0 +1,5 @@
+py-algorand-sdk
+python-dotenv
+cryptography
+python-telegram-bot
+openai
