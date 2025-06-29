@@ -1,22 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { useSnackbar } from 'notistack';
+import { WidgetController } from '@tinymanorg/tinyman-swap-widget-sdk';
 import { aiIntentService, ParsedIntent } from '../services/aiIntentService';
 import { TransactionService, NFTMetadata } from '../services/transactionService';
 import { tradingService, tinymanSigner } from '../services/tradingService';
 import { ipfsService } from '../services/ipfsService';
 import { getAlgodConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs';
 import logo from '../assets/logo.svg';
+import SwapWidget from './SwapWidget';
+import algosdk from 'algosdk';
 
 interface ChatMessage {
   id: string;
-  type: 'user' | 'bot';
+  type: 'user' | 'bot' | 'widget';
   content: string;
   timestamp: Date;
   status?: 'pending' | 'success' | 'error';
   txid?: string;
   imageUrl?: string;
   isPendingImage?: boolean;
+  widgetParams?: {
+    fromAsset?: string;
+    toAsset?: string;
+    amount?: number;
+  };
 }
 
 interface PendingImage {
@@ -28,42 +36,108 @@ interface PendingImage {
 // Add this at the top, outside the component
 let messageCounter = 0;
 
-// TinymanSwapWidget as a pure iframe-based modal
+// TinymanSwapWidget using the official SDK
 const TinymanSwapWidget: React.FC<{
-  open: boolean;
-  onClose: () => void;
   accountAddress: string;
   fromAsset?: string;
   toAsset?: string;
   amount?: number;
-}> = ({ open, onClose, accountAddress, fromAsset, toAsset, amount }) => {
-  if (!open) return null;
+  onSwapCompleted?: (data: any) => void;
+  onSwapFailed?: (data: any) => void;
+}> = ({ accountAddress, fromAsset, toAsset, amount, onSwapCompleted, onSwapFailed }) => {
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const [widgetController, setWidgetController] = useState<WidgetController | null>(null);
+  // Access wallet context for signing
+  const { signTransactions } = useWallet();
 
-  // Construct the widget URL according to the docs
-  const params = new URLSearchParams({
-    useParentSigner: 'false', // set to 'true' if you want to handle signing in your app
-    accountAddress,
-    network: 'testnet',
-    ...(fromAsset ? { fromAsset } : {}),
-    ...(toAsset ? { toAsset } : {}),
-    ...(amount ? { amount: amount.toString() } : {}),
-    parentUrlOrigin: window.location.origin,
-  });
-  const widgetUrl = `https://app.tinyman.org/#/swap-widget?${params.toString()}`;
+  useEffect(() => {
+    if (widgetRef.current && accountAddress) {
+      // Create widget options
+      const widgetOptions = {
+        accountAddress,
+        network: 'testnet',
+        useParentSigner: true, // Enable parent signer bridge
+        parentUrlOrigin: window.location.origin,
+        ...(fromAsset && { fromAsset }),
+        ...(toAsset && { toAsset }),
+        ...(amount && { amount: amount.toString() }),
+      };
+
+      const widgetUrl = WidgetController.generateWidgetIframeUrl(widgetOptions);
+      const iframe = document.createElement('iframe');
+      iframe.src = widgetUrl;
+      iframe.style.width = '100%';
+      iframe.style.height = '500px';
+      iframe.style.border = 'none';
+      iframe.style.borderRadius = '16px';
+      iframe.title = 'Tinyman Swap Widget';
+
+      if (widgetRef.current) {
+        widgetRef.current.innerHTML = '';
+        widgetRef.current.appendChild(iframe);
+      }
+
+      const controller = new WidgetController({
+        iframe,
+        accountAddress,
+        network: 'testnet',
+      });
+      controller.addWidgetEventListeners();
+
+      // Parent signer bridge
+      const handleWidgetMessage = async (event: MessageEvent) => {
+        if (event.origin !== 'https://app.tinyman.org') return;
+        const { type, data, id } = event.data;
+        if (type === 'SIGN_TRANSACTIONS') {
+          try {
+            // signTransactions expects an array of base64 encoded transactions
+            const signed = await signTransactions(data.transactions);
+            // Respond to the widget with the signed transactions
+            iframe.contentWindow?.postMessage({
+              type: 'SIGN_TRANSACTIONS_RESPONSE',
+              id,
+              data: { signedTransactions: signed },
+            }, 'https://app.tinyman.org');
+          } catch (err) {
+            iframe.contentWindow?.postMessage({
+              type: 'SIGN_TRANSACTIONS_RESPONSE',
+              id,
+              error: err instanceof Error ? err.message : 'Signing failed',
+            }, 'https://app.tinyman.org');
+          }
+        } else {
+          // Handle other widget events
+          const { type, data } = event.data;
+          switch (type) {
+            case 'WIDGET_READY':
+              break;
+            case 'SWAP_COMPLETED':
+              onSwapCompleted?.(data);
+              break;
+            case 'SWAP_FAILED':
+              onSwapFailed?.(data);
+              break;
+          }
+        }
+      };
+      window.addEventListener('message', handleWidgetMessage);
+      setWidgetController(controller);
+      return () => {
+        window.removeEventListener('message', handleWidgetMessage);
+        if (controller) {
+          controller.removeWidgetEventListeners();
+        }
+      };
+    }
+    return undefined;
+  }, [accountAddress, fromAsset, toAsset, amount, onSwapCompleted, onSwapFailed, signTransactions]);
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', borderRadius: 16, padding: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.10)' }}>
-        <iframe
-          title="Tinyman Swap Widget"
-          src={widgetUrl}
-          width={400}
-          height={500}
-          style={{ border: 'none', borderRadius: 16 }}
-          sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-        />
-        <button onClick={onClose} style={{ display: 'block', margin: '12px auto', padding: '8px 24px', borderRadius: 8, background: '#4ecb6e', color: '#fff', border: 'none', fontWeight: 600, fontSize: 16 }}>Close</button>
+    <div style={{ minWidth: 350, maxWidth: 420, width: '100%' }}>
+      <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>
+        Swap Tokens {fromAsset && toAsset && amount ? `(${amount} ${fromAsset} → ${toAsset})` : ''}
       </div>
+      <div ref={widgetRef} style={{ minHeight: '500px' }} />
     </div>
   );
 };
@@ -76,8 +150,6 @@ const AlgoIntentChat: React.FC = () => {
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [accountInfo, setAccountInfo] = useState<{ algo: number; assets: any[] }>({ algo: 0, assets: [] });
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
-  const [swapWidgetOpen, setSwapWidgetOpen] = useState(false);
-  const [swapWidgetParams, setSwapWidgetParams] = useState<{ fromAsset?: string; toAsset?: string; amount?: number }>({});
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -250,12 +322,28 @@ const AlgoIntentChat: React.FC = () => {
     }
   };
 
+  // Utility to sanitize AI output
+  const sanitizeBotText = (text: string) => {
+    if (!text) return '';
+    // Remove markdown bold/italic (**text**, *text*, __text__, _text_)
+    let sanitized = text.replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/_([^_]+)_/g, '$1');
+    // Remove citation brackets like [1], [2], [3], [4]
+    sanitized = sanitized.replace(/\[\d+\]/g, '');
+    // Remove repeated whitespace
+    sanitized = sanitized.replace(/\s{2,}/g, ' ');
+    // Trim
+    return sanitized.trim();
+  };
+
   const handleIntent = async (intent: ParsedIntent, file: File | null) => {
     const { intent: action, parameters, context, explanation } = intent;
 
     // Always show explanation if present
     if (explanation) {
-      addBotMessage(explanation);
+      addBotMessage(sanitizeBotText(explanation));
       // If the intent is not actionable, return early
       if ([
         'explain_algorand', 'explain_defi', 'explain_nft', 'explain_trading',
@@ -291,9 +379,6 @@ const AlgoIntentChat: React.FC = () => {
       case 'send_algo':
         await handleSendAlgo(parameters);
         break;
-      case 'send_algo_multi':
-        await handleSendAlgoMulti(parameters);
-        break;
       case 'create_nft':
         await handleCreateNFT(parameters, file);
         break;
@@ -322,6 +407,11 @@ const AlgoIntentChat: React.FC = () => {
   };
 
   const handleSendAlgo = async (parameters: any) => {
+    if (!activeAddress || !algosdk.isValidAddress(activeAddress)) {
+      addBotMessage('❌ Your wallet address is not valid. Please reconnect your wallet.');
+      enqueueSnackbar('Invalid sender address', { variant: 'error' });
+      return;
+    }
     if (!parameters.amount || !parameters.recipient) {
       addBotMessage('❌ Missing amount or recipient address for ALGO transfer.');
       enqueueSnackbar('Missing amount or recipient address', { variant: 'error' });
@@ -330,8 +420,9 @@ const AlgoIntentChat: React.FC = () => {
     addBotMessage(`🔄 Sending ${parameters.amount} ALGO to ${parameters.recipient}...`, 'pending');
     enqueueSnackbar('Sending ALGO...', { variant: 'info' });
     try {
+      console.log('Using sender address:', activeAddress, 'Valid:', algosdk.isValidAddress(activeAddress), 'Length:', activeAddress.length);
       const result = await transactionService.sendAlgo(
-        activeAddress!,
+        activeAddress,
         parameters.recipient,
         parameters.amount,
         transactionSigner!
@@ -350,32 +441,7 @@ const AlgoIntentChat: React.FC = () => {
     }
   };
 
-  const handleSendAlgoMulti = async (parameters: any) => {
-    if (!parameters.recipients || parameters.recipients.length < 2) {
-      addBotMessage('❌ Multi-recipient transfer requires at least 2 recipients.');
-      return;
-    }
-
-    addBotMessage(`🔄 Sending ALGO to ${parameters.recipients.length} recipients...`, 'pending');
-
-    try {
-      const result = await transactionService.sendAlgoMulti(
-        activeAddress!,
-        parameters.recipients,
-        transactionSigner!
-      );
-
-      if (result.status === 'success') {
-        addBotMessage(result.message, 'success', result.txid);
-        enqueueSnackbar('Multi-recipient transfer successful!', { variant: 'success' });
-      } else {
-        addBotMessage(result.message, 'error');
-        enqueueSnackbar('Multi-recipient transfer failed', { variant: 'error' });
-      }
-    } catch (error) {
-      addBotMessage(`❌ Failed to send ALGO: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-    }
-  };
+  const isValidAlgorandAddress = (addr: string) => /^[A-Z2-7]{58}$/.test(addr);
 
   const handleCreateNFT = async (parameters: any, file: File | null) => {
     if (!parameters.name) {
@@ -641,6 +707,18 @@ const AlgoIntentChat: React.FC = () => {
     }
   };
 
+  // Add a message with the widget
+  const addWidgetMessage = (params: { fromAsset?: string; toAsset?: string; amount?: number }) => {
+    const newMessage: ChatMessage = {
+      id: `${Date.now()}-${messageCounter++}`,
+      type: 'widget',
+      content: '',
+      timestamp: new Date(),
+      widgetParams: params,
+    };
+    setMessages((prev) => [...prev, newMessage]);
+  };
+
   // Update the Tinyman swap handler
   const handleSwapTokens = async (parameters: any) => {
     if (!parameters.from_asset || !parameters.to_asset || !parameters.amount) {
@@ -648,32 +726,19 @@ const AlgoIntentChat: React.FC = () => {
       return;
     }
 
-    addBotMessage(`🔄 Getting swap quote for ${parameters.amount} ${parameters.from_asset} → ${parameters.to_asset}...`, 'pending');
-    
-    try {
-      // Use the robust Tinyman-compatible signer
-      const result = await tradingService.executeSwap(
-        parameters.from_asset,
-        parameters.to_asset,
-        parameters.amount,
-        transactionSigner!,
-        activeAddress!,
-        signTransactions // pass this for Tinyman swaps
-      );
-      // Debug logging
-      console.log('Tinyman swap result:', result);
-
-      if (result.status === 'success') {
-        addBotMessage(result.message, 'success', result.txid);
-        enqueueSnackbar('Swap executed successfully!', { variant: 'success' });
-      } else {
-        addBotMessage(result.message, 'error');
-        enqueueSnackbar('Swap failed', { variant: 'error' });
-      }
-    } catch (error) {
-      addBotMessage(`❌ Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-      enqueueSnackbar('Swap failed', { variant: 'error' });
+    if (!activeAddress) {
+      addBotMessage('❌ Please connect your wallet first to perform swaps.');
+      return;
     }
+
+    // Show confirmation message
+    addBotMessage(`🔄 Opening swap widget for ${parameters.amount} ${parameters.from_asset} → ${parameters.to_asset}...`);
+    // Add the widget as a chat message
+    addWidgetMessage({
+      fromAsset: parameters.from_asset,
+      toAsset: parameters.to_asset,
+      amount: parameters.amount,
+    });
   };
 
   const handleSetLimitOrder = async (parameters: any) => {
@@ -772,64 +837,85 @@ const AlgoIntentChat: React.FC = () => {
       {/* Messages Container */}
       <div className="messages-container" style={{ flex: 1, minHeight: 0, padding: 0, background: 'transparent', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
         {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`message ${message.type}`}
-            style={{ display: 'flex', flexDirection: message.type === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '0.7rem', width: '100%' }}
-          >
-            {/* Bubble */}
-            <div
-              className="message-content"
-              style={{
-                borderRadius: '1.5rem',
-                background: message.type === 'user' ? '#4ecb6e' : '#fff',
-                color: message.type === 'user' ? '#fff' : '#1a232b',
-                borderBottomRightRadius: message.type === 'user' ? '0.7rem' : '1.5rem',
-                borderBottomLeftRadius: message.type === 'bot' ? '0.7rem' : '1.5rem',
-                border: message.type === 'bot' ? '1.5px solid #e0f7fa' : 'none',
-                fontWeight: 500,
-                fontSize: '1.08rem',
-                boxShadow: 'none',
-                padding: '1.1rem 1.4rem',
-                maxWidth: '70%',
-                marginLeft: message.type === 'user' ? 0 : '0.2rem',
-                marginRight: message.type === 'bot' ? 0 : '0.2rem',
-                marginBottom: 0,
-                width: 'fit-content',
-              }}
-            >
-              <div className="whitespace-pre-wrap">{message.content}</div>
-              
-              {/* Display image if present */}
-              {message.imageUrl && (
-                <div style={{ marginTop: '0.8rem', borderRadius: '0.8rem', overflow: 'hidden' }}>
-                  <img 
-                    src={message.imageUrl} 
-                    alt="Uploaded content"
-                    style={{ 
-                      maxWidth: '100%', 
-                      maxHeight: '200px', 
-                      borderRadius: '0.8rem',
-                      objectFit: 'cover'
-                    }}
-                  />
-                </div>
-              )}
-              
-              {message.status && (
-                <div className={`message-status ${message.status}`} style={{ marginTop: '0.5rem', fontSize: '0.9rem', opacity: 0.8 }}>
-                  {message.status === 'pending' && '⏳ Processing...'}
-                  {message.status === 'success' && '✅ Success'}
-                  {message.status === 'error' && '❌ Failed'}
-                </div>
-              )}
-              {message.txid && (
-                <div className="message-status" style={{ marginTop: '0.3rem', fontSize: '0.85rem', opacity: 0.7 }}>
-                  TxID: {message.txid.substring(0, 8)}...
-                </div>
-              )}
+          message.type === 'widget' ? (
+            <div key={message.id} className="message bot" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: '0.7rem', width: '100%' }}>
+              <div className="message-content" style={{ borderRadius: '1.5rem', border: '1.5px solid #e0f7fa', background: '#fff', color: '#1a232b', fontWeight: 500, fontSize: '1.08rem', boxShadow: 'none', padding: '1.1rem 1.4rem', maxWidth: '70%', width: 'fit-content' }}>
+                <SwapWidget
+                  fromAsset={message.widgetParams?.fromAsset}
+                  toAsset={message.widgetParams?.toAsset}
+                  amount={message.widgetParams?.amount}
+                  onSwapCompleted={(data) => {
+                    addBotMessage(`✅ Swap completed successfully! Transaction ID: ${data.txid || 'N/A'}`, 'success', data.txid);
+                    enqueueSnackbar('Swap completed successfully!', { variant: 'success' });
+                    updateBalance();
+                  }}
+                  onSwapFailed={(data) => {
+                    addBotMessage(`❌ Swap failed: ${data.error || 'Unknown error'}`, 'error');
+                    enqueueSnackbar('Swap failed', { variant: 'error' });
+                  }}
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div
+              key={message.id}
+              className={`message ${message.type}`}
+              style={{ display: 'flex', flexDirection: message.type === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '0.7rem', width: '100%' }}
+            >
+              {/* Bubble */}
+              <div
+                className="message-content"
+                style={{
+                  borderRadius: '1.5rem',
+                  background: message.type === 'user' ? '#4ecb6e' : '#fff',
+                  color: message.type === 'user' ? '#fff' : '#1a232b',
+                  borderBottomRightRadius: message.type === 'user' ? '0.7rem' : '1.5rem',
+                  borderBottomLeftRadius: message.type === 'bot' ? '0.7rem' : '1.5rem',
+                  border: message.type === 'bot' ? '1.5px solid #e0f7fa' : 'none',
+                  fontWeight: 500,
+                  fontSize: '1.08rem',
+                  boxShadow: 'none',
+                  padding: '1.1rem 1.4rem',
+                  maxWidth: '70%',
+                  marginLeft: message.type === 'user' ? 0 : '0.2rem',
+                  marginRight: message.type === 'bot' ? 0 : '0.2rem',
+                  marginBottom: 0,
+                  width: 'fit-content',
+                }}
+              >
+                <div className="whitespace-pre-wrap">{message.content}</div>
+                
+                {/* Display image if present */}
+                {message.imageUrl && (
+                  <div style={{ marginTop: '0.8rem', borderRadius: '0.8rem', overflow: 'hidden' }}>
+                    <img 
+                      src={message.imageUrl} 
+                      alt="Uploaded content"
+                      style={{ 
+                        maxWidth: '100%', 
+                        maxHeight: '200px', 
+                        borderRadius: '0.8rem',
+                        objectFit: 'cover'
+                      }}
+                    />
+                  </div>
+                )}
+                
+                {message.status && (
+                  <div className={`message-status ${message.status}`} style={{ marginTop: '0.5rem', fontSize: '0.9rem', opacity: 0.8 }}>
+                    {message.status === 'pending' && '⏳ Processing...'}
+                    {message.status === 'success' && '✅ Success'}
+                    {message.status === 'error' && '❌ Failed'}
+                  </div>
+                )}
+                {message.txid && (
+                  <div className="message-status" style={{ marginTop: '0.3rem', fontSize: '0.85rem', opacity: 0.7 }}>
+                    TxID: {message.txid.substring(0, 8)}...
+                  </div>
+                )}
+              </div>
+            </div>
+          )
         ))}
         {isProcessing && (
           <div className="message bot" style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', gap: '0.7rem', width: '100%' }}>
@@ -941,14 +1027,6 @@ const AlgoIntentChat: React.FC = () => {
           </div>
         )}
       </div>
-      <TinymanSwapWidget
-        open={swapWidgetOpen}
-        onClose={() => setSwapWidgetOpen(false)}
-        accountAddress={activeAddress || ''}
-        fromAsset={swapWidgetParams.fromAsset}
-        toAsset={swapWidgetParams.toAsset}
-        amount={swapWidgetParams.amount}
-      />
     </div>
   );
 };

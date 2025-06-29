@@ -46,6 +46,10 @@ export async function sendAlgo(sender: string, recipient: string, amount: number
   return txid.txid;
 }
 
+// NOTE: This implementation is NOT compatible with most wallet connectors (Pera, Defly, etc.)
+// because it uses AtomicTransactionComposer and expects a custom group signer.
+// Use the direct frontend implementation for multi-send instead.
+/*
 export async function sendAlgoMulti(
   sender: string,
   recipients: Array<{ address: string; amount: number }>,
@@ -91,11 +95,21 @@ export async function sendAlgoMulti(
     
     // Add each payment transaction to the composer
     for (const recipient of recipients) {
+      const suggestedParams = await algod.getTransactionParams().do();
+      // Detailed debug log
+      console.log('Building txn:', {
+        from: sender,
+        fromValid: algosdk.isValidAddress(sender),
+        to: recipient.address,
+        toValid: algosdk.isValidAddress(recipient.address),
+        amount: Math.floor(recipient.amount * 1_000_000),
+        suggestedParams
+      });
       const paymentTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
         from: sender,
         to: recipient.address,
         amount: Math.floor(recipient.amount * 1_000_000),
-        suggestedParams: await algod.getTransactionParams().do(),
+        suggestedParams,
         note: new TextEncoder().encode(`Multi-recipient transfer to ${recipient.address}`)
       } as any);
       
@@ -115,6 +129,7 @@ export async function sendAlgoMulti(
     };
 
   } catch (error) {
+    console.error('Atomic group error:', error);
     return {
       status: 'error',
       message: `❌ Atomic multi-recipient transfer failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -122,6 +137,7 @@ export async function sendAlgoMulti(
     };
   }
 }
+*/
 
 export async function createNFT(sender: string, metadata: { name: string; unitName: string; totalSupply: number; description?: string; url?: string }, signer: any) {
   if (!algosdk.isValidAddress(sender)) throw new Error('Invalid sender address');
@@ -242,84 +258,7 @@ export class TransactionService {
       };
     }
   }
-
-  async sendAlgoMulti(
-    sender: string,
-    recipients: Array<{ address: string; amount: number }>,
-    signer: any
-  ): Promise<TransactionResult> {
-    try {
-      if (recipients.length < 2) {
-        return {
-          status: 'error',
-          message: '❌ Multi-recipient transfer requires at least 2 recipients.',
-          error: 'Invalid recipients'
-        };
-      }
-
-      // Validate all recipients
-      for (let i = 0; i < recipients.length; i++) {
-        const recipient = recipients[i];
-        if (!this.isValidAddress(recipient.address)) {
-          return {
-            status: 'error',
-            message: `❌ Invalid recipient address #${i + 1}`,
-            error: 'Invalid address'
-          };
-        }
-        if (recipient.amount <= 0) {
-          return {
-            status: 'error',
-            message: `❌ Invalid amount for recipient #${i + 1}`,
-            error: 'Invalid amount'
-          };
-        }
-      }
-
-      // Use algokit-utils AtomicTransactionComposer for proper group handling
-      const atc = new algosdk.AtomicTransactionComposer();
-      
-      // Get algod client from stored configuration
-      const algod = new algosdk.Algodv2(
-        this.algodConfig.token || '',
-        this.algodConfig.server,
-        this.algodConfig.port || ''
-      );
-      
-      // Add each payment transaction to the composer
-      for (const recipient of recipients) {
-        const paymentTxn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-          from: sender,
-          to: recipient.address,
-          amount: Math.floor(recipient.amount * 1_000_000),
-          suggestedParams: await algod.getTransactionParams().do(),
-          note: new TextEncoder().encode(`Multi-recipient transfer to ${recipient.address}`)
-        } as any);
-        
-        atc.addTransaction({
-          txn: paymentTxn,
-          signer: signer
-        });
-      }
-
-      // Execute the atomic group
-      const result = await atc.execute(algod, 5);
-
-      return {
-        status: 'success',
-        txid: result.txIDs[0], // First transaction ID represents the group
-        message: `✅ Atomic multi-recipient transfer successful! ${recipients.length} payments sent atomically. Group TxID: ${result.txIDs[0]}`
-      };
-
-    } catch (error) {
-      return {
-        status: 'error',
-        message: `❌ Atomic multi-recipient transfer failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-    }
-  }
-
+  
   async createNFT(
     sender: string,
     metadata: NFTMetadata,
