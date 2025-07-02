@@ -262,7 +262,9 @@ const SwapWidget: React.FC<SwapWidgetProps> = ({ fromAsset, toAsset, amount, onS
       </button>
       {error && <div style={{ color: '#b91c1c', marginTop: 14, width: '100%', textAlign: 'center', fontWeight: 600 }}>{error}</div>}
       {swapResult && swapResult.status === 'success' && (
-        <div style={{ color: '#10b981', marginTop: 14, width: '100%', textAlign: 'center', fontWeight: 600 }}>Swap successful! TxID: {swapResult.txid}</div>
+        <div style={{ color: '#10b981', marginTop: 14, width: '100%', textAlign: 'center', fontWeight: 600 }}>
+          Swap successful! <a href={`https://testnet.explorer.perawallet.app/tx/${swapResult.txid}`} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>View on Explorer</a>
+        </div>
       )}
       {!activeAddress && <div style={{ color: '#b91c1c', marginTop: 12, textAlign: 'center', fontWeight: 500, fontSize: '1.01rem' }}>Connect your wallet to swap</div>}
     </div>
