@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { useSnackbar } from 'notistack';
-import { WidgetController } from '@tinymanorg/tinyman-swap-widget-sdk';
 import { aiIntentService, ParsedIntent } from '../services/aiIntentService';
 import { TransactionService, NFTMetadata } from '../services/transactionService';
 import { tradingService, tinymanSigner } from '../services/tradingService';
@@ -35,112 +34,6 @@ interface PendingImage {
 
 // Add this at the top, outside the component
 let messageCounter = 0;
-
-// TinymanSwapWidget using the official SDK
-const TinymanSwapWidget: React.FC<{
-  accountAddress: string;
-  fromAsset?: string;
-  toAsset?: string;
-  amount?: number;
-  onSwapCompleted?: (data: any) => void;
-  onSwapFailed?: (data: any) => void;
-}> = ({ accountAddress, fromAsset, toAsset, amount, onSwapCompleted, onSwapFailed }) => {
-  const widgetRef = useRef<HTMLDivElement>(null);
-  const [widgetController, setWidgetController] = useState<WidgetController | null>(null);
-  // Access wallet context for signing
-  const { signTransactions } = useWallet();
-
-  useEffect(() => {
-    if (widgetRef.current && accountAddress) {
-      // Create widget options
-      const widgetOptions = {
-        accountAddress,
-        network: 'testnet',
-        useParentSigner: true, // Enable parent signer bridge
-        parentUrlOrigin: window.location.origin,
-        ...(fromAsset && { fromAsset }),
-        ...(toAsset && { toAsset }),
-        ...(amount && { amount: amount.toString() }),
-      };
-
-      const widgetUrl = WidgetController.generateWidgetIframeUrl(widgetOptions);
-      const iframe = document.createElement('iframe');
-      iframe.src = widgetUrl;
-      iframe.style.width = '100%';
-      iframe.style.height = '500px';
-      iframe.style.border = 'none';
-      iframe.style.borderRadius = '16px';
-      iframe.title = 'Tinyman Swap Widget';
-
-      if (widgetRef.current) {
-        widgetRef.current.innerHTML = '';
-        widgetRef.current.appendChild(iframe);
-      }
-
-      const controller = new WidgetController({
-        iframe,
-        accountAddress,
-        network: 'testnet',
-      });
-      controller.addWidgetEventListeners();
-
-      // Parent signer bridge
-      const handleWidgetMessage = async (event: MessageEvent) => {
-        if (event.origin !== 'https://app.tinyman.org') return;
-        const { type, data, id } = event.data;
-        if (type === 'SIGN_TRANSACTIONS') {
-          try {
-            // signTransactions expects an array of base64 encoded transactions
-            const signed = await signTransactions(data.transactions);
-            // Respond to the widget with the signed transactions
-            iframe.contentWindow?.postMessage({
-              type: 'SIGN_TRANSACTIONS_RESPONSE',
-              id,
-              data: { signedTransactions: signed },
-            }, 'https://app.tinyman.org');
-          } catch (err) {
-            iframe.contentWindow?.postMessage({
-              type: 'SIGN_TRANSACTIONS_RESPONSE',
-              id,
-              error: err instanceof Error ? err.message : 'Signing failed',
-            }, 'https://app.tinyman.org');
-          }
-        } else {
-          // Handle other widget events
-          const { type, data } = event.data;
-          switch (type) {
-            case 'WIDGET_READY':
-              break;
-            case 'SWAP_COMPLETED':
-              onSwapCompleted?.(data);
-              break;
-            case 'SWAP_FAILED':
-              onSwapFailed?.(data);
-              break;
-          }
-        }
-      };
-      window.addEventListener('message', handleWidgetMessage);
-      setWidgetController(controller);
-      return () => {
-        window.removeEventListener('message', handleWidgetMessage);
-        if (controller) {
-          controller.removeWidgetEventListeners();
-        }
-      };
-    }
-    return undefined;
-  }, [accountAddress, fromAsset, toAsset, amount, onSwapCompleted, onSwapFailed, signTransactions]);
-
-  return (
-    <div style={{ minWidth: 350, maxWidth: 420, width: '100%' }}>
-      <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>
-        Swap Tokens {fromAsset && toAsset && amount ? `(${amount} ${fromAsset} → ${toAsset})` : ''}
-      </div>
-      <div ref={widgetRef} style={{ minHeight: '500px' }} />
-    </div>
-  );
-};
 
 const AlgoIntentChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -910,7 +803,7 @@ const AlgoIntentChat: React.FC = () => {
                 )}
                 {message.txid && (
                   <div className="message-status" style={{ marginTop: '0.3rem', fontSize: '0.85rem', opacity: 0.7 }}>
-                    TxID: {message.txid.substring(0, 8)}...
+                    TxID: <a href={`https://testnet.explorer.perawallet.app/tx/${message.txid}`} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>{message.txid.substring(0, 8)}...</a>
                   </div>
                 )}
               </div>
