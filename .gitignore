@@ -1,2 +1,6 @@
 node_modules/
 .env
+telegram_bot/telegram_sessions.json
+telegram_bot/wallet.json
+telegram_bot/wallets/
+telegram_bot/.wallet_session

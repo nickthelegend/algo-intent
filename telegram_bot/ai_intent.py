@@ -11,7 +11,7 @@ class AIIntentParser:
             
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url="https://api.perplexity.ai"
+            base_url="https://models.github.ai/inference"
         )  # Fixed: Added missing closing parenthesis
         
         self.system_prompt = """Analyze Algorand-related requests and return JSON with:
@@ -108,7 +108,7 @@ User: "Transfer NFT 456 to ADDRESS1 and ADDRESS2"
     def parse(self, user_input: str) -> Optional[Dict]:
         try:
             response = self.client.chat.completions.create(
-                model="sonar-pro",
+                model="meta/Meta-Llama-3.1-405B-Instruct",
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user_input}
