@@ -147,3 +147,19 @@ def parse_nft_intent(user_input: str):
         "description": description,
         "total_supply": total_supply
     }
+
+def parse_swap_intent(user_input: str):
+    """
+    Parse natural language intent for swapping assets.
+    """
+    pattern = re.compile(r"swap\s+(?P<amount>[0-9.]+)\s+(?P<from_asset>[a-zA-Z]+)\s+to\s+(?P<to_asset>[a-zA-Z]+)", re.IGNORECASE)
+    match = pattern.search(user_input)
+    if not match:
+        return None
+
+    return {
+        "intent": "swap",
+        "amount": float(match.group("amount")),
+        "from_asset": match.group("from_asset").upper(),
+        "to_asset": match.group("to_asset").upper()
+    }

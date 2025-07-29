@@ -16,7 +16,7 @@ class AIIntentParser:
         
         self.system_prompt = """Analyze Algorand-related requests and return JSON with:
 {
-  "intent": "send_algo|send_algo_multi|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft|send_nft|send_nft_multi",
+  "intent": "send_algo|send_algo_multi|create_wallet|connect_wallet|create_nft|disconnect|balance|create_nft_with_image|create_nft|send_nft|send_nft_multi|swap",
   "parameters": {
     "amount": float,
     "recipient": "address", 
@@ -25,8 +25,10 @@ class AIIntentParser:
     "name": "string",
     "supply": int,
     "description": "string",
-    "image_url": "string"
-    "asset_id": int
+    "image_url": "string",
+    "asset_id": int,
+    "from_asset": "string",
+    "to_asset": "string"
   }
 }
 
@@ -103,7 +105,10 @@ User: "Send NFT 123 to ADDRESS"
 {"intent": "send_nft", "parameters": {"asset_id": 123, "recipient": "ADDRESS"}}
 
 User: "Transfer NFT 456 to ADDRESS1 and ADDRESS2"
-{"intent": "send_nft_multi", "parameters": {"asset_id": 456, "recipients": ["ADDRESS1", "ADDRESS2"]}}"""
+{"intent": "send_nft_multi", "parameters": {"asset_id": 456, "recipients": ["ADDRESS1", "ADDRESS2"]}}
+
+User: "Swap 10 ALGO to GONNA"
+{"intent": "swap", "parameters": {"amount": 10, "from_asset": "ALGO", "to_asset": "GONNA"}}"""
 
     def parse(self, user_input: str) -> Optional[Dict]:
         try:

@@ -383,6 +383,12 @@ async def start(update: Update, context: CallbackContext):
                 "Check Balance",
                 switch_inline_query_current_chat="Check balance"
             )
+        ],
+        [
+            InlineKeyboardButton(
+                "Swap Assets",
+                switch_inline_query_current_chat="Swap [amount] [from_asset] to [to_asset]"
+            )
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

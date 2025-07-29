@@ -2,7 +2,7 @@ import argparse
 import sys
 import json
 import logging
-from intent_parser import parse_intent, parse_nft_intent
+from intent_parser import parse_intent, parse_nft_intent, parse_swap_intent
 from transaction_builder import build_and_send_transaction, create_nft
 from utils import get_algod_client, generate_unit_name
 from wallet import (
@@ -91,6 +91,11 @@ def main():
     nft_parser = subparsers.add_parser('create-nft-intent', help='Create NFT from natural language intent')
     nft_parser.add_argument('intent', help='Natural language NFT creation instruction')
     nft_parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+
+    # Swap commands
+    swap_parser = subparsers.add_parser('swap-intent', help='Swap assets using natural language')
+    swap_parser.add_argument('intent', help='Natural language swap instruction (e.g., "Swap 10 ALGO for USDC")')
+    swap_parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
     args = parser.parse_args()
     
@@ -193,17 +198,23 @@ def main():
         try:
             wallet = get_connected_wallet()
             
-            parsed = parse_nft_intent(args.intent)
-            if not parsed or not parsed.get("name"):
+            parsed_intent = parse_intent(args.intent)
+            if not parsed_intent or parsed_intent.get('intent') != 'create_nft':
+                print("❌ Could not parse NFT creation instruction. Example: 'Create an NFT named BlueDragon'")
+                return
+
+            parameters = parsed_intent.get('parameters', {})
+            name = parameters.get("name")
+            
+            if not name:
                 print("❌ Could not parse NFT name from your instruction. Example: 'Create an NFT named BlueDragon'")
                 return
 
             # Prompt for missing fields
-            name = parsed.get("name")
-            total_supply = parsed.get("total_supply") or prompt_missing(
+            total_supply = parameters.get("supply") or prompt_missing(
                 "total_supply", "Please enter total supply", default=1, is_number=True
             )
-            description = parsed.get("description") or prompt_missing(
+            description = parameters.get("description") or prompt_missing(
                 "description", "Please enter description (optional)", default=""
             )
             unit_name = generate_unit_name(name)
@@ -227,6 +238,45 @@ def main():
             }
             print(json.dumps(result, indent=2))
             
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            sys.exit(1)
+
+    # Swap intent
+    elif args.command == 'swap-intent':
+        logger = setup_logging(args.debug if hasattr(args, 'debug') else False)
+        
+        # Ensure wallet is connected before proceeding
+        if not ensure_wallet_connected():
+            sys.exit(1)
+            
+        intent = parse_intent(args.intent)
+        if not intent or intent.get('intent') != 'swap':
+            print("❌ Could not parse your instruction. Please check your input.")
+            print("Example: 'Swap 10 ALGO for USDC'")
+            sys.exit(1)
+            
+        if args.debug:
+            logger.debug(f"Parsed intent: {intent}")
+            
+        try:
+            # Get the connected wallet
+            wallet = get_connected_wallet()
+            algod_client = get_algod_client()
+            
+            parameters = intent.get('parameters', {})
+            from_asset = parameters.get('from_asset')
+            to_asset = parameters.get('to_asset')
+            amount = parameters.get('amount')
+
+            if not from_asset or not to_asset or not amount:
+                print("❌ Missing parameters for swap.")
+                sys.exit(1)
+
+            # TODO: Implement the swap logic here
+            print(f"Swapping {amount} {from_asset} to {to_asset}")
+            print("Swap functionality not yet implemented.")
+
         except Exception as e:
             print(f"❌ Error: {e}")
             sys.exit(1)
