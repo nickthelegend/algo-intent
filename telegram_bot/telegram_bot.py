@@ -488,6 +488,8 @@ async def handle_message(update: Update, context: CallbackContext):
             await handle_disconnect(update, context)
         elif intent == 'balance':
             await handle_balance_check(update, context)
+        elif intent == 'swap':
+            await handle_swap(update, context, params)
         else:
             await update.message.reply_text("❌ Unsupported action")
     except Exception as e:
@@ -1218,6 +1220,31 @@ async def handle_send_nft(update: Update, context: CallbackContext, params: dict
             
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def handle_swap(update: Update, context: CallbackContext, params: dict):
+    """Handle swap transaction"""
+    user_id = update.effective_user.id
+    
+    if not validate_session(user_id):
+        await update.message.reply_text("❌ Please connect a wallet first!")
+        return
+
+    required_params = ['amount', 'from_asset', 'to_asset']
+    if not all(param in params for param in required_params):
+        await update.message.reply_text("❌ Missing swap details. Example: 'Swap 10 ALGO to GONNA'")
+        return
+
+    amount = params['amount']
+    from_asset = params['from_asset']
+    to_asset = params['to_asset']
+
+    # Placeholder for actual swap logic
+    await update.message.reply_text(
+        f"🔄 Initiating swap of {amount} {from_asset} to {to_asset}.\n"
+        "This feature is under development. Stay tuned!"
+    )
+
+    logger.info(f"User {user_id} requested swap: {amount} {from_asset} to {to_asset}")
 
 async def handle_send_nft_multi(update: Update, context: CallbackContext, params: dict):
     user_id = update.effective_user.id
