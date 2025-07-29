@@ -4,3 +4,5 @@ telegram_bot/telegram_sessions.json
 telegram_bot/wallet.json
 telegram_bot/wallets/
 telegram_bot/.wallet_session
+telegram_bot/bot.log
+telegram_bot/security_events.log
