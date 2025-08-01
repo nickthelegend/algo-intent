@@ -1,14 +1,14 @@
 import requests
 import json
 
-def get_swap_quote():
-    url = "https://api.vestigelabs.org/swap/v4?from_asa=0&to_asa=2582294183&amount=1&mode=sef&denominating_asset_id=2582294183"
+def get_swap_quote(to_asa):
+    url = f"https://api.vestigelabs.org/swap/v4?from_asa=0&to_asa={to_asa}&amount=1&mode=sef&denominating_asset_id={to_asa}"
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
 
-def get_swap_transactions(quote):
-    url = "https://api.vestigelabs.org/swap/v4/transactions?sender=LEGENDMQQJJWSQVHRFK36EP7GTM3MTI3VD3GN25YMKJ6MEBR35J4SBNVD4&slippage=0.005"
+def get_swap_transactions(quote, address):
+    url = f"https://api.vestigelabs.org/swap/v4/transactions?sender={address}&slippage=0.005"
     headers = {"Content-Type": "application/json"}
     response = requests.post(url, headers=headers, data=json.dumps(quote))
     response.raise_for_status()
@@ -21,26 +21,27 @@ def search_asset(query):
     data = response.json()
 
     if not data.get("results"):
-        return []
+        return None
 
-    formatted_results = []
     for asset in data["results"]:
-        asset_id = asset.get("id")
         labels = asset.get("labels", [])
-        if 2 in labels or 6 in labels:
-            labels_str = ", ".join(map(str, labels))
-            formatted_results.append(f"id: {asset_id}, labels: {labels_str}")
+        if 2 in labels and 6 in labels:
+            return asset.get("id")
     
-    return formatted_results
+    return None
 
 if __name__ == "__main__":
     try:
-        print("Searching for asset 'GONNA':")
-        asset_infos = search_asset("GONNA")
-        if asset_infos:
-            for info in asset_infos:
-                print(info)
+        print("Searching for asset 'GONNA'...")
+        asset_id = search_asset("GONNA")
+        if asset_id:
+            print(f"Found asset with ID: {asset_id}")
+            print("Getting swap quote...")
+            quote = get_swap_quote(asset_id)
+            print("Getting swap transactions...")
+            transactions = get_swap_transactions(quote, "LEGENDMQQJJWSQVHRFK36EP7GTM3MTI3VD3GN25YMKJ6MEBR35J4SBNVD4")
+            print(json.dumps(transactions, indent=2))
         else:
-            print("No assets found for 'GONNA'")
+            print("No matching asset found for 'GONNA'")
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
