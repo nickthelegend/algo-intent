@@ -1825,3 +1825,32 @@ OSError: [WinError 121] The semaphore timeout period has expired
 2025-08-02 11:44:33,734 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
 2025-08-02 11:44:43,907 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
 2025-08-02 11:44:54,081 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:01,488 - __main__ - INFO - Starting Algo-Intent Bot with enhanced security
+2025-08-02 11:45:01,489 - security - INFO - Bot started with public access and message security enabled
+2025-08-02 11:45:02,344 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getMe "HTTP/1.1 200 OK"
+2025-08-02 11:45:02,511 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/deleteWebhook "HTTP/1.1 200 OK"
+2025-08-02 11:45:02,513 - telegram.ext.Application - INFO - Application started
+2025-08-02 11:45:07,770 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:07,771 - __main__ - INFO - User 6293148875 (ibnotnickthe): @gonnaAgentBot swap 10 ALGO to GONNA...
+2025-08-02 11:45:10,586 - httpx - INFO - HTTP Request: POST https://models.github.ai/inference/chat/completions "HTTP/1.1 200 OK"
+2025-08-02 11:45:13,798 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/sendMessage "HTTP/1.1 200 OK"
+2025-08-02 11:45:13,799 - __main__ - INFO - User 6293148875 initiated swap: 10 ALGO to GONNA
+2025-08-02 11:45:18,298 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:18,594 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/deleteMessage "HTTP/1.1 200 OK"
+2025-08-02 11:45:20,318 - __main__ - ERROR - Transaction signing failed for user 6293148875: TransactionPool.Remember: txn dead: round 54144447 outside of 52359696--52359796
+2025-08-02 11:45:20,318 - security - INFO - User 6293148875 - TRANSACTION_ERROR - TransactionPool.Remember: txn dead: round 54144447 outside of 52359696--52359796
+2025-08-02 11:45:20,622 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/sendMessage "HTTP/1.1 200 OK"
+2025-08-02 11:45:28,468 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:38,639 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:48,823 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:45:58,997 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:46:09,179 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:46:19,345 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:46:29,513 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:46:39,679 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:46:49,847 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:47:00,019 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:47:10,187 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:47:20,354 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:47:30,525 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
+2025-08-02 11:47:40,694 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8203783857:AAGD9-j_ZxWLzKU-PrGAGCykBngAXB_mMjM/getUpdates "HTTP/1.1 200 OK"
