@@ -798,11 +798,12 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
         # Extract important data BEFORE clearing context
         pending_txn = context.user_data.get('pending_txn')
         pending_txns = context.user_data.get('pending_txns')
+        pending_swap = context.user_data.get('pending_swap')
         transaction_type = context.user_data.get('transaction_type', 'send')
         asset_id = context.user_data.get('asset_id')
         recipients = context.user_data.get('recipients', [])
 
-        if not pending_txn and not pending_txns:
+        if not pending_txn and not pending_txns and not pending_swap:
             await update.message.reply_text("❌ No pending transaction found.")
             context.user_data.clear()
             return
@@ -810,7 +811,10 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
         algod_client = get_algod_client()
 
         # Handle different transaction types
-        if transaction_type == 'opt_in':
+        if transaction_type == 'swap':
+            confirmed = execute_swap_transactions(pending_swap, algod_client, password=password, frontend='telegram')
+            await update.message.reply_text(f"✅ Swap successful! Confirmed in round {confirmed.get('confirmed-round')}")
+        elif transaction_type == 'opt_in':
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
             txid = algod_client.send_transaction(signed_txn)
             log_security_event(user_id, "ASSET_OPT_IN", f"Asset: {asset_id}, TxID: {txid}")
@@ -1249,16 +1253,25 @@ async def handle_swap(update: Update, context: CallbackContext, params: dict):
         sessions = load_sessions()
         user_session = sessions.get(str(user_id), {})
         transactions = get_swap_transactions(quote, user_session["address"])
-        
-        algod_client = get_algod_client()
-        confirmed = execute_swap_transactions(transactions, algod_client, frontend='telegram')
-        
-        await update.message.reply_text(f"Swap confirmed: {confirmed}")
+
+        # Store transaction data and ask for password
+        context.user_data['pending_swap'] = transactions
+        context.user_data['state'] = 'transaction_password'
+        context.user_data['transaction_type'] = 'swap'
+        context.user_data['swap_details'] = {'amount': amount, 'from_asset': from_asset, 'to_asset': to_asset}
+
+        await update.message.reply_text(
+            f"🔄 **Swap Confirmation**\n\n"
+            f"You are about to swap {amount} {from_asset} for {to_asset}.\n"
+            f"Please enter your wallet password to confirm.",
+            parse_mode="Markdown"
+        )
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Error during swap: {str(e)}")
+        await update.message.reply_text(f"❌ Error during swap preparation: {str(e)}")
+        logger.error(f"Swap prep failed for user {user_id}: {e}")
 
-    logger.info(f"User {user_id} requested swap: {amount} {from_asset} to {to_asset}")
+    logger.info(f"User {user_id} initiated swap: {amount} {from_asset} to {to_asset}")
 
 async def handle_send_nft_multi(update: Update, context: CallbackContext, params: dict):
     user_id = update.effective_user.id

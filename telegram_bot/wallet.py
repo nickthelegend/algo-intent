@@ -150,6 +150,7 @@ class WalletManager:
             
         # For Telegram: Return details instead of CLI prompts
         if frontend == 'telegram' and not password:
+            print("No Password", password)
             return {
                 "needs_approval": True,
                 "txn_details": {
