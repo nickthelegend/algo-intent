@@ -53,6 +53,8 @@ def execute_swap_transactions(txs: list, algod_client, password=None, frontend='
     print(f"✅ Sent group transaction, txID: {txid}")
     confirmed = wait_for_confirmation(algod_client, txid)
     return confirmed
+
+
 def wait_for_confirmation(client, txid, timeout=4):
     last_round = client.status().get('last-round')
     for _ in range(timeout):

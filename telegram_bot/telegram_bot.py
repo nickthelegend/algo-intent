@@ -20,6 +20,7 @@ from transaction_builder import build_and_send_transaction, build_and_send_multi
 from utils import get_algod_client, generate_unit_name
 import tempfile
 from ipfs_utils import upload_to_ipfs
+from swap import search_asset, get_swap_quote, get_swap_transactions, execute_swap_transactions
 
 
 
@@ -1238,11 +1239,24 @@ async def handle_swap(update: Update, context: CallbackContext, params: dict):
     from_asset = params['from_asset']
     to_asset = params['to_asset']
 
-    # Placeholder for actual swap logic
-    await update.message.reply_text(
-        f"🔄 Initiating swap of {amount} {from_asset} to {to_asset}.\n"
-        "This feature is under development. Stay tuned!"
-    )
+    try:
+        asset_id = search_asset(to_asset)
+        if not asset_id:
+            await update.message.reply_text(f"Could not find asset {to_asset}")
+            return
+
+        quote = get_swap_quote(asset_id)
+        sessions = load_sessions()
+        user_session = sessions.get(str(user_id), {})
+        transactions = get_swap_transactions(quote, user_session["address"])
+        
+        algod_client = get_algod_client()
+        confirmed = execute_swap_transactions(transactions, algod_client, frontend='telegram')
+        
+        await update.message.reply_text(f"Swap confirmed: {confirmed}")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error during swap: {str(e)}")
 
     logger.info(f"User {user_id} requested swap: {amount} {from_asset} to {to_asset}")
 
