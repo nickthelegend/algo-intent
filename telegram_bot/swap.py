@@ -1,5 +1,9 @@
 import requests
 import json
+from algosdk import encoding
+from wallet import sign_transaction
+import base64
+from algosdk.transaction import Transaction, SignedTransaction
 
 def get_swap_quote(to_asa):
     url = f"https://api.vestigelabs.org/swap/v4?from_asa=0&to_asa={to_asa}&amount=1&mode=sef&denominating_asset_id={to_asa}"
@@ -29,6 +33,38 @@ def search_asset(query):
             return asset.get("id")
     
     return None
+
+
+def execute_swap_transactions(txs: list, algod_client, password=None, frontend='cli'):
+    signed_group = []
+
+    for tx in txs:
+        raw_txn_b64 = tx["txn"]
+        txn_bytes = base64.b64decode(raw_txn_b64)
+        txn_dict = encoding.msgpack.unpackb(txn_bytes)
+        txn = Transaction.undictify(txn_dict)
+
+        # Your custom wallet manager handles the signing
+        signed = sign_transaction(txn, password=password, frontend=frontend)
+        signed_group.append(signed)
+
+    # Send the signed group
+    txid = algod_client.send_transactions(signed_group)
+    print(f"✅ Sent group transaction, txID: {txid}")
+    confirmed = wait_for_confirmation(algod_client, txid)
+    return confirmed
+def wait_for_confirmation(client, txid, timeout=4):
+    last_round = client.status().get('last-round')
+    for _ in range(timeout):
+        pending = client.pending_transaction_info(txid)
+        if pending.get('confirmed-round', 0) > 0:
+            return pending
+        last_round += 1
+        client.status_after_block(last_round)
+    raise Exception("❌ Transaction not confirmed in time")
+
+
+
 
 if __name__ == "__main__":
     try:
