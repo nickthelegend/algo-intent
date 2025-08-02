@@ -67,7 +67,12 @@ def execute_swap_transactions(
         t = Transaction.undictify(d)
         unsigned_list.append(t)
 
-    # 2) Assign group id for atomic cross-check
+    # 2) Set the fee for each transaction
+    params = algod_client.suggested_params()
+    for txn in unsigned_list:
+        txn.fee = params.min_fee * 2
+
+    # 3) Assign group id for atomic cross-check
     calculate_group_id(unsigned_list)
     assign_group_id(unsigned_list)
 

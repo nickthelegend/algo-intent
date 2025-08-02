@@ -798,12 +798,12 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
         # Extract important data BEFORE clearing context
         pending_txn = context.user_data.get('pending_txn')
         pending_txns = context.user_data.get('pending_txns')
-        pending_swap = context.user_data.get('pending_swap')
+        pending_quote = context.user_data.get('pending_quote')
         transaction_type = context.user_data.get('transaction_type', 'send')
         asset_id = context.user_data.get('asset_id')
         recipients = context.user_data.get('recipients', [])
 
-        if not pending_txn and not pending_txns and not pending_swap:
+        if not pending_txn and not pending_txns and not pending_quote:
             await update.message.reply_text("❌ No pending transaction found.")
             context.user_data.clear()
             return
@@ -812,7 +812,10 @@ async def handle_transaction_password(update: Update, context: CallbackContext, 
 
         # Handle different transaction types
         if transaction_type == 'swap':
-            confirmed = execute_swap_transactions(pending_swap, algod_client, password=password, frontend='telegram')
+            sessions = load_sessions()
+            user_session = sessions.get(str(user_id), {})
+            transactions = get_swap_transactions(pending_quote, user_session["address"])
+            confirmed = execute_swap_transactions(transactions, algod_client, password=password, frontend='telegram')
             await update.message.reply_text(f"✅ Swap successful! Confirmed in round {confirmed.get('confirmed-round')}")
         elif transaction_type == 'opt_in':
             signed_txn = sign_transaction(pending_txn, password=password, frontend='telegram')
@@ -1250,12 +1253,9 @@ async def handle_swap(update: Update, context: CallbackContext, params: dict):
             return
 
         quote = get_swap_quote(asset_id)
-        sessions = load_sessions()
-        user_session = sessions.get(str(user_id), {})
-        transactions = get_swap_transactions(quote, user_session["address"])
 
-        # Store transaction data and ask for password
-        context.user_data['pending_swap'] = transactions
+        # Store quote and ask for password
+        context.user_data['pending_quote'] = quote
         context.user_data['state'] = 'transaction_password'
         context.user_data['transaction_type'] = 'swap'
         context.user_data['swap_details'] = {'amount': amount, 'from_asset': from_asset, 'to_asset': to_asset}

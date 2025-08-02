@@ -29,3 +29,7 @@
 2025-08-02 11:02:13,360 - SECURITY - Bot started with public access and message security enabled
 2025-08-02 11:03:11,563 - SECURITY - Bot started with public access and message security enabled
 2025-08-02 11:22:16,829 - SECURITY - Bot started with public access and message security enabled
+2025-08-02 11:23:22,740 - SECURITY - Bot started with public access and message security enabled
+2025-08-02 11:23:48,126 - SECURITY - User 6293148875 - TRANSACTION_ERROR - txgroup had 2000 in fees, which is less than the minimum 4 * 1000
+2025-08-02 11:34:15,444 - SECURITY - Bot started with public access and message security enabled
+2025-08-02 11:34:34,725 - SECURITY - User 6293148875 - TRANSACTION_ERROR - TransactionPool.Remember: txn dead: round 54144206 outside of 52359465--52359565
